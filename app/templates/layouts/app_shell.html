@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Greek Chapters Platform{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <style>
+    :root{
+      --bg-0:#f3f8ff;
+      --bg-1:#e8f2ff;
+      --bg-2:#d8e9ff;
+      --panel:#ffffffde;
+      --panel-strong:#ffffff;
+      --line:#cfe0fb;
+      --line-strong:#b4cdf4;
+      --text:#11243d;
+      --muted:#4d6691;
+      --brand:#2d7cff;
+      --brand-strong:#1760e6;
+      --ok:#0f9f7f;
+      --warn:#d97d24;
+      --danger:#cb4d67;
+      --shadow:0 20px 45px rgba(17,46,97,.12);
+      --shadow-soft:0 10px 25px rgba(34,90,170,.12);
+    }
+    *{ box-sizing:border-box; }
+    html, body{ font-family:"Manrope", "Segoe UI", sans-serif; color:var(--text); }
+    body{
+      background:
+        radial-gradient(80rem 40rem at -8% -15%, rgba(73,147,255,.30), transparent 45%),
+        radial-gradient(75rem 38rem at 115% 8%, rgba(101,179,255,.26), transparent 45%),
+        linear-gradient(180deg, var(--bg-0), var(--bg-1) 60%, var(--bg-2));
+      min-height:100vh;
+    }
+    .shell{
+      min-height:100vh;
+      display:grid;
+      grid-template-columns:1fr;
+    }
+    @media (min-width: 1024px){
+      .shell{ grid-template-columns:280px 1fr; }
+    }
+    .glass{
+      background:var(--panel);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    .soft-shadow{ box-shadow:var(--shadow-soft); }
+    .nav-link{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:14px;
+      font-weight:600;
+      color:#1a3a63;
+      transition:all .18s ease;
+    }
+    .nav-link:hover{
+      background:linear-gradient(180deg, rgba(255,255,255,.96), rgba(238,247,255,.96));
+      color:#0f3566;
+      transform:translateY(-1px);
+    }
+    .panel{
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(245,250,255,.98));
+      border-radius:18px;
+      box-shadow:var(--shadow-soft);
+    }
+    .panel-muted{
+      border:1px solid var(--line);
+      background:#ffffffc7;
+      border-radius:14px;
+    }
+    .kpi-card{
+      border:1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.98), rgba(241,249,255,.98));
+      border-radius:18px;
+      padding:16px;
+      box-shadow:var(--shadow-soft);
+      position:relative;
+      overflow:hidden;
+    }
+    .kpi-card:before{
+      content:"";
+      position:absolute;
+      top:-28px;
+      right:-20px;
+      width:96px;
+      height:96px;
+      border-radius:999px;
+      background:radial-gradient(circle at center, rgba(68,148,255,.28), transparent 65%);
+      pointer-events:none;
+    }
+    .btn-primary{
+      border:1px solid var(--brand);
+      background:linear-gradient(180deg, var(--brand), var(--brand-strong));
+      color:#fff;
+      border-radius:10px;
+      padding:8px 12px;
+      font-size:12px;
+      font-weight:700;
+      transition:all .18s ease;
+    }
+    .btn-primary:hover{ filter:brightness(1.03); transform:translateY(-1px); }
+    .btn-ghost{
+      border:1px solid var(--line-strong);
+      background:#fff;
+      color:#0f3566;
+      border-radius:10px;
+      padding:8px 12px;
+      font-size:12px;
+      font-weight:600;
+      transition:all .18s ease;
+    }
+    .btn-ghost:hover{ background:#eef6ff; }
+    .table-head{
+      background:linear-gradient(180deg, #f7fbff, #edf5ff);
+      border-bottom:1px solid var(--line);
+      color:#5474a7;
+    }
+    .border-slate-200{ border-color:var(--line) !important; }
+    .bg-white{ background:var(--panel-strong) !important; }
+    .text-slate-500, .text-slate-400, .text-slate-600{ color:var(--muted) !important; }
+    .text-slate-800, .text-slate-900{ color:var(--text) !important; }
+    input, select, textarea{
+      border-color:var(--line-strong) !important;
+      border-radius:12px !important;
+      background:#fff !important;
+    }
+    input:focus, select:focus, textarea:focus{
+      outline:none;
+      box-shadow:0 0 0 3px rgba(45,124,255,.20);
+      border-color:#6faeff !important;
+    }
+    a{ transition:all .18s ease; }
+    .sticky.top-0{ backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  </style>
+</head>
+<body class="min-h-screen text-slate-800">
+  <div class="shell">
+    <aside class="glass border-r border-slate-200/80 p-4 lg:p-5">
+      <div class="mb-6 panel p-4">
+        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Greek Chapters</div>
+        <div class="text-xl font-extrabold text-[#0f3566]">Intelligence CRM</div>
+        <div class="text-xs text-slate-500 mt-1">Light blue workspace</div>
+      </div>
+      <nav class="space-y-1 text-sm">
+        <a href="/dashboard" class="nav-link"><span>Dashboard</span><span class="text-[10px] text-slate-400">Home</span></a>
+        <a href="/chapters" class="nav-link"><span>Chapter Explorer</span><span class="text-[10px] text-slate-400">Leads</span></a>
+        <a href="/vendors" class="nav-link"><span>Vendor Explorer</span><span class="text-[10px] text-slate-400">Partners</span></a>
+        <a href="/crm" class="nav-link"><span>Unified CRM</span><span class="text-[10px] text-slate-400">Pipeline</span></a>
+      </nav>
+      <div class="mt-8 panel-muted p-3 text-xs text-slate-600">
+        <div class="font-semibold">{{ me.username }} ({{ me.role }})</div>
+        <div>{{ me.account_name or "No account mapped" }}</div>
+        <a href="/logout" class="mt-2 inline-block text-blue-700 hover:underline font-semibold">Logout</a>
+      </div>
+    </aside>
+
+    <main class="p-4 lg:p-6">
+      <header class="glass soft-shadow mb-4 rounded-2xl border border-slate-200/80 px-4 py-3 flex items-center justify-between">
+        <div>
+          <h1 class="text-lg font-extrabold tracking-tight text-[#123d71]">{% block page_title %}Workspace{% endblock %}</h1>
+          <p class="text-xs text-slate-500">{% block page_subtitle %}Decision intelligence{% endblock %}</p>
+        </div>
+        <div class="text-xs text-slate-500 panel-muted px-2 py-1">Live workspace</div>
+      </header>
+
+      <div class="grid grid-cols-1 {% block main_grid %}xl:grid-cols-[1fr_360px]{% endblock %} gap-4">
+        <section class="space-y-4">{% block content %}{% endblock %}</section>
+        {% block context_panel %}
+          <aside class="hidden xl:block"></aside>
+        {% endblock %}
+      </div>
+    </main>
+  </div>
+  <div id="appToastHost" class="fixed right-4 bottom-4 z-50 space-y-2 pointer-events-none"></div>
+  <script>
+    window.appToast = function(message, level){
+      const host = document.getElementById("appToastHost");
+      if(!host){ return; }
+      const tone = (level || "info").toLowerCase();
+      const node = document.createElement("div");
+      let style = "border:1px solid #b9d7ff;background:#eff7ff;color:#14447e;";
+      if(tone === "success"){ style = "border:1px solid #a9e6d7;background:#edfcf7;color:#0f6f59;"; }
+      if(tone === "error"){ style = "border:1px solid #ffc8d4;background:#fff0f4;color:#a6314f;"; }
+      node.setAttribute("style", style + "padding:10px 12px;border-radius:12px;box-shadow:0 10px 25px rgba(16,56,115,.16);font-size:12px;font-weight:700;pointer-events:auto;max-width:300px;");
+      node.textContent = message || "";
+      host.appendChild(node);
+      setTimeout(() => {
+        node.style.transition = "opacity .25s ease, transform .25s ease";
+        node.style.opacity = "0";
+        node.style.transform = "translateY(6px)";
+      }, 2200);
+      setTimeout(() => node.remove(), 2600);
+    };
+  </script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

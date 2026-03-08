@@ -1,0 +1,586 @@
+{% extends "layouts/app_shell.html" %}
+{% block title %}CRM{% endblock %}
+{% block page_title %}CRM{% endblock %}
+{% block page_subtitle %}Track pipeline, tasks, and follow-ups{% endblock %}
+{% block content %}
+<div x-data x-init="$store.crm.load()" class="space-y-4">
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Contacts</div>
+      <div class="text-2xl font-semibold" x-text="$store.crm.kpis.total_contacts || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Open Tasks</div>
+      <div class="text-2xl font-semibold" x-text="$store.crm.kpis.open_tasks || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Overdue</div>
+      <div class="text-2xl font-semibold text-rose-700" x-text="$store.crm.kpis.overdue_tasks || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Due Today</div>
+      <div class="text-2xl font-semibold text-amber-700" x-text="$store.crm.kpis.due_today_tasks || 0"></div>
+    </div>
+  </div>
+
+  <div class="panel p-4 space-y-3">
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" @click="$store.crm.view='board'" class="btn-ghost px-3 py-1.5 text-sm"
+              :class="$store.crm.view==='board' ? '!bg-[#1d68ee] !text-white !border-[#1d68ee]' : ''">Pipeline</button>
+      <button type="button" @click="$store.crm.view='table'" class="btn-ghost px-3 py-1.5 text-sm"
+              :class="$store.crm.view==='table' ? '!bg-[#1d68ee] !text-white !border-[#1d68ee]' : ''">Table</button>
+      <button type="button" @click="$store.crm.view='calendar'" class="btn-ghost px-3 py-1.5 text-sm"
+              :class="$store.crm.view==='calendar' ? '!bg-[#1d68ee] !text-white !border-[#1d68ee]' : ''">Calendar</button>
+      <button type="button" @click="$store.crm.load(true)" class="ml-auto btn-ghost px-3 py-1.5 text-sm">Refresh</button>
+    </div>
+    <div class="grid md:grid-cols-3 gap-2">
+      <input x-model="$store.crm.search" @input="$store.crm.queueApply()" placeholder="Search contacts..." class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <select x-model="$store.crm.filters.type" @change="$store.crm.apply()" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All Types</option>
+        <option value="chapter">Chapter</option>
+        <option value="vendor">Vendor</option>
+      </select>
+      <select x-model="$store.crm.filters.status" @change="$store.crm.apply()" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All Stages</option>
+        <template x-for="s in $store.crm.stageKeys" :key="s">
+          <option :value="s" x-text="$store.crm.stageLabel(s)"></option>
+        </template>
+      </select>
+    </div>
+  </div>
+
+  <div x-show="$store.crm.loading" class="panel p-4">
+    <div class="animate-pulse space-y-2">
+      <div class="h-4 w-40 rounded bg-slate-200"></div>
+      <div class="h-20 rounded-xl bg-slate-100"></div>
+      <div class="h-20 rounded-xl bg-slate-100"></div>
+      <div class="h-20 rounded-xl bg-slate-100"></div>
+    </div>
+  </div>
+
+  <div x-show="$store.crm.view==='board' && !$store.crm.loading" class="grid xl:grid-cols-3 gap-3">
+    <template x-for="stage in $store.crm.stageKeys" :key="stage">
+      <section class="panel overflow-hidden">
+        <div class="px-3 py-2 border-b border-slate-200 bg-slate-50">
+          <div class="text-sm font-semibold" x-text="$store.crm.stageLabel(stage)"></div>
+          <div class="text-xs text-slate-500" x-text="`${$store.crm.boardItems(stage).length} leads`"></div>
+        </div>
+        <div class="p-2 space-y-2 max-h-[22rem] overflow-auto">
+          <template x-for="row in $store.crm.boardItems(stage)" :key="row.id">
+            <button type="button" @click="$store.crm.select(row.id)" class="w-full text-left rounded-xl border border-slate-200 p-2 hover:bg-slate-50">
+              <div class="text-sm font-medium" x-text="row.name || '-'"></div>
+              <div class="text-xs text-slate-500" x-text="`${row.type || '-'} | ${row.connection || '-'}`"></div>
+              <div class="mt-1 text-xs text-rose-700" x-show="row.is_overdue_follow_up">Follow-up overdue</div>
+            </button>
+          </template>
+          <div x-show="$store.crm.boardItems(stage).length===0" class="text-xs text-slate-400 p-2">No leads</div>
+        </div>
+      </section>
+    </template>
+  </div>
+
+  <div x-show="$store.crm.view==='table' && !$store.crm.loading" class="panel overflow-hidden">
+    <div class="px-3 py-2 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-2 text-xs">
+      <span class="font-semibold text-slate-700" x-text="`${$store.crm.selectedIds.length} selected`"></span>
+      <select x-model="$store.crm.bulk.status" class="rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+        <option value="">No stage change</option>
+        <template x-for="s in $store.crm.stageKeys" :key="`bulk-${s}`">
+          <option :value="s" x-text="$store.crm.stageLabel(s)"></option>
+        </template>
+      </select>
+      <input type="date" x-model="$store.crm.bulk.follow_up_date" class="rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+      <select x-model="$store.crm.bulk.priority" class="rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+        <option value="">No priority change</option>
+        <option value="low">Low</option>
+        <option value="normal">Normal</option>
+        <option value="high">High</option>
+      </select>
+      <button type="button" @click="$store.crm.applyBulk()" class="btn-primary px-2.5 py-1 text-xs"
+              :disabled="$store.crm.selectedIds.length===0"
+              :class="$store.crm.selectedIds.length===0 ? 'opacity-50 cursor-not-allowed' : ''">
+        Apply Bulk Update
+      </button>
+      <button type="button" @click="$store.crm.clearSelection()" class="btn-ghost px-2.5 py-1 text-xs">Clear</button>
+    </div>
+    <div class="overflow-x-auto max-h-[32rem] overflow-y-auto">
+      <table class="w-full text-sm">
+        <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
+          <tr>
+            <th class="text-left px-3 py-2 w-8">
+              <input type="checkbox" aria-label="Select visible contacts" @click.stop
+                     :checked="$store.crm.allVisibleSelected()"
+                     @change="$store.crm.toggleAllVisible($event.target.checked)">
+            </th>
+            <th class="text-left px-3 py-2">Name</th>
+            <th class="text-left px-3 py-2">Type</th>
+            <th class="text-left px-3 py-2">Stage</th>
+            <th class="text-left px-3 py-2">Follow-up</th>
+            <th class="text-left px-3 py-2">Priority</th>
+            <th class="text-left px-3 py-2">Tasks</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="row in $store.crm.rows" :key="row.id">
+            <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
+                :class="$store.crm.isSelected(row.id) ? 'bg-blue-50/70' : ''"
+                @click="$store.crm.select(row.id)">
+              <td class="px-3 py-2" @click.stop>
+                <input type="checkbox" :checked="$store.crm.isSelected(row.id)"
+                       :aria-label="`Select ${row.name || 'contact'}`"
+                       @change="$store.crm.toggleSelect(row.id, $event.target.checked)">
+              </td>
+              <td class="px-3 py-2 font-medium" x-text="row.name || '-'"></td>
+              <td class="px-3 py-2 capitalize" x-text="row.type || '-'"></td>
+              <td class="px-3 py-2">
+                <span class="inline-flex rounded-md px-2 py-0.5 text-xs capitalize" :class="$store.crm.statusBadgeClass(row.status)" x-text="$store.crm.stageLabel(row.status)"></span>
+              </td>
+              <td class="px-3 py-2" x-text="row.follow_up_date || '-'"></td>
+              <td class="px-3 py-2 capitalize" x-text="row.priority || 'normal'"></td>
+              <td class="px-3 py-2" x-text="row.open_task_count || 0"></td>
+            </tr>
+          </template>
+          <tr x-show="$store.crm.rows.length===0"><td colspan="7" class="p-8 text-center text-slate-500">No contacts match your filters.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div x-show="$store.crm.view==='calendar' && !$store.crm.loading" class="panel p-4">
+    <div class="space-y-3">
+      <template x-for="group in $store.crm.calendarGroups()" :key="group.date">
+        <div class="rounded-xl border border-slate-200">
+          <div class="px-3 py-2 border-b border-slate-200 bg-slate-50 text-sm font-medium">
+            <span x-text="group.date"></span>
+            <span class="text-xs text-slate-500 ml-2" x-text="`(${group.items.length})`"></span>
+          </div>
+          <div class="p-2 space-y-2">
+            <template x-for="item in group.items" :key="item.id">
+              <button type="button" @click="$store.crm.select(item.crm_contact_id)" class="w-full text-left rounded-lg border border-slate-200 p-2 hover:bg-slate-50">
+                <div class="text-sm font-medium" x-text="item.title"></div>
+                <div class="text-xs text-slate-500" x-text="`${item.contact_name || '-'} | ${item.contact_type || '-'}`"></div>
+                <div class="text-xs text-slate-500" x-text="`Priority: ${item.priority || 'normal'}`"></div>
+              </button>
+            </template>
+          </div>
+        </div>
+      </template>
+      <div x-show="$store.crm.calendarEvents.length===0" class="text-sm text-slate-500">No scheduled tasks.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block context_panel %}
+<aside x-data class="panel p-4 h-fit">
+  <template x-if="!$store.crm.selected">
+    <div class="text-sm text-slate-500">Select a contact to manage notes, tasks, and follow-up tracking.</div>
+  </template>
+  <template x-if="$store.crm.selected && $store.crm.detailLoading">
+    <div class="animate-pulse space-y-2">
+      <div class="h-4 w-40 rounded bg-slate-200"></div>
+      <div class="h-20 rounded-xl bg-slate-100"></div>
+      <div class="h-20 rounded-xl bg-slate-100"></div>
+      <div class="h-20 rounded-xl bg-slate-100"></div>
+    </div>
+  </template>
+  <template x-if="$store.crm.selected && !$store.crm.detailLoading">
+    <div class="space-y-4">
+      <div>
+        <div class="text-xs uppercase text-slate-500">Selected Contact</div>
+        <h3 class="text-lg font-semibold" x-text="$store.crm.selected.name || '-'"></h3>
+        <div class="text-xs text-slate-500" x-text="`${$store.crm.selected.type || '-'} | ${$store.crm.selected.connection || '-'}`"></div>
+        <a x-show="$store.crm.detailHref($store.crm.selected)" :href="$store.crm.detailHref($store.crm.selected)" class="text-sm text-blue-700 hover:underline">Open detail page</a>
+      </div>
+
+      <div class="space-y-2">
+        <label class="text-xs text-slate-500 uppercase">Stage</label>
+        <select x-model="$store.crm.form.status" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <template x-for="s in $store.crm.stageKeys" :key="s">
+            <option :value="s" x-text="$store.crm.stageLabel(s)"></option>
+          </template>
+        </select>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-xs text-slate-500 uppercase">Follow-up</label>
+            <input type="date" x-model="$store.crm.form.follow_up_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 uppercase">Expected Close</label>
+            <input type="date" x-model="$store.crm.form.expected_close_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-xs text-slate-500 uppercase">Priority</label>
+            <select x-model="$store.crm.form.priority" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+              <option value="low">Low</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 uppercase">Value</label>
+            <input type="number" step="0.01" x-model="$store.crm.form.value_estimate" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          </div>
+        </div>
+        <label class="text-xs text-slate-500 uppercase">Notes</label>
+        <textarea x-model="$store.crm.form.notes" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" rows="3"></textarea>
+        <button type="button" @click="$store.crm.saveContact()" class="w-full btn-primary px-3 py-2 text-sm">Save Contact</button>
+      </div>
+
+      <div class="space-y-2">
+        <div class="text-xs uppercase text-slate-500">Add Note</div>
+        <textarea x-model="$store.crm.newNote" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" rows="2" placeholder="Conversation summary..."></textarea>
+        <button type="button" @click="$store.crm.addNote()" class="btn-ghost px-3 py-1.5 text-sm">Save Note</button>
+        <div class="space-y-2 max-h-36 overflow-auto">
+          <template x-for="n in $store.crm.detail.notes" :key="n.id">
+            <div class="rounded-lg border border-slate-200 p-2">
+              <div class="text-sm" x-text="n.note"></div>
+              <div class="text-xs text-slate-500 mt-1" x-text="n.created_at"></div>
+            </div>
+          </template>
+          <div x-show="$store.crm.detail.notes.length===0" class="text-xs text-slate-400">No notes yet.</div>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div class="text-xs uppercase text-slate-500">Tasks</div>
+        <div class="grid grid-cols-[1fr_auto_auto] gap-2">
+          <input x-model="$store.crm.newTask.title" placeholder="Task title" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <input type="date" x-model="$store.crm.newTask.due_date" class="rounded-xl border border-slate-300 px-2 py-2 text-sm">
+          <select x-model="$store.crm.newTask.priority" class="rounded-xl border border-slate-300 px-2 py-2 text-sm">
+            <option value="low">Low</option>
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <button type="button" @click="$store.crm.addTask()" class="btn-ghost px-3 py-1.5 text-sm">Add Task</button>
+        <div class="space-y-2 max-h-44 overflow-auto">
+          <template x-for="t in $store.crm.detail.tasks" :key="t.id">
+            <div class="rounded-lg border border-slate-200 p-2">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="text-sm" :class="(t.status||'')==='done' ? 'line-through text-slate-400' : ''" x-text="t.title"></div>
+                  <div class="text-xs text-slate-500" x-text="`Due: ${t.due_date || '-'} | ${t.priority || 'normal'}`"></div>
+                </div>
+                <button type="button" @click="$store.crm.toggleTask(t)" class="btn-ghost px-2 py-1 text-xs" x-text="(t.status||'')==='done' ? 'Reopen' : 'Done'"></button>
+              </div>
+            </div>
+          </template>
+          <div x-show="$store.crm.detail.tasks.length===0" class="text-xs text-slate-400">No tasks yet.</div>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div class="text-xs uppercase text-slate-500">Timeline</div>
+        <div class="space-y-2 max-h-40 overflow-auto">
+          <template x-for="ev in $store.crm.detail.timeline" :key="ev.id">
+            <div class="rounded-lg border border-slate-200 p-2">
+              <div class="text-sm capitalize" x-text="(ev.action || '').replace('_',' ')"></div>
+              <div class="text-xs text-slate-500" x-text="ev.detail || '-'"></div>
+              <div class="text-xs text-slate-400 mt-1" x-text="ev.created_at"></div>
+            </div>
+          </template>
+          <div x-show="$store.crm.detail.timeline.length===0" class="text-xs text-slate-400">No timeline yet.</div>
+        </div>
+      </div>
+    </div>
+  </template>
+</aside>
+
+<script>
+document.addEventListener("alpine:init", () => {
+  Alpine.store("crm", {
+    loaded: false,
+    loading: false,
+    detailLoading: false,
+    view: "board",
+    pendingContactId: null,
+    stageKeys: ["prospect","contacted","follow_up","negotiating","closed","dormant"],
+    all: [],
+    rows: [],
+    board: {stages:{}},
+    calendarEvents: [],
+    kpis: {total_contacts:0, open_tasks:0, overdue_tasks:0, due_today_tasks:0},
+    search: "",
+    searchTimer: null,
+    filters: {type:"", status:""},
+    selectedIds: [],
+    bulk: {status:"", follow_up_date:"", priority:""},
+    selected: null,
+    detail: {notes:[], tasks:[], timeline:[], tags:[]},
+    form: {status:"prospect", notes:"", follow_up_date:"", expected_close_date:"", priority:"normal", value_estimate:""},
+    newNote: "",
+    newTask: {title:"", due_date:"", priority:"normal"},
+    stageLabel(status){
+      const s = (status || "").toLowerCase();
+      const map = {prospect:"Prospect", contacted:"Contacted", follow_up:"Follow Up", negotiating:"Negotiating", closed:"Served", dormant:"Dormant"};
+      return map[s] || "Prospect";
+    },
+    statusBadgeClass(status){
+      const s = (status || "").toLowerCase();
+      if(s==="closed") return "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20";
+      if(s==="negotiating") return "bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-600/20";
+      if(s==="contacted" || s==="follow_up") return "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-600/20";
+      if(s==="dormant") return "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-600/20";
+      return "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20";
+    },
+    queueApply(){
+      if(this.searchTimer) clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(()=>this.apply(), 180);
+    },
+    async load(force=false){
+      if(this.loading) return;
+      if(this.loaded && !force) return;
+      this.loading = true;
+      try{
+        const [crmOut, boardOut, calOut] = await Promise.all([
+          fetch("/api/m/crm").then(r=>r.json()),
+          fetch("/api/m/crm/board").then(r=>r.json()),
+          fetch("/api/m/crm/calendar").then(r=>r.json()),
+        ]);
+        this.all = crmOut.ok ? (crmOut.rows || []) : [];
+        this.board = boardOut.ok ? boardOut : {stages:{}};
+        this.kpis = boardOut.ok ? (boardOut.kpis || this.kpis) : this.kpis;
+        this.calendarEvents = calOut.ok ? (calOut.events || []) : [];
+        this.apply();
+        const existingIds = new Set(this.all.map((r)=>Number(r.id)));
+        this.selectedIds = this.selectedIds.filter((id)=>existingIds.has(Number(id)));
+        if(this.pendingContactId){
+          await this.select(this.pendingContactId);
+          this.pendingContactId = null;
+        } else if(this.selected && this.selected.id){
+          await this.select(this.selected.id);
+        }
+      }catch(_err){
+        (window.appToast || alert)("Could not load CRM data", "error");
+      }finally{
+        this.loading = false;
+        this.loaded = true;
+      }
+    },
+    apply(){
+      const q = (this.search || "").toLowerCase().trim();
+      this.rows = this.all.filter((r)=>{
+        const type = (r.type || "").toLowerCase();
+        const status = (r.status || "").toLowerCase();
+        if(this.filters.type && type !== this.filters.type) return false;
+        if(this.filters.status && status !== this.filters.status) return false;
+        if(q && !Object.values(r).join(" ").toLowerCase().includes(q)) return false;
+        return true;
+      });
+      const rowIds = new Set(this.rows.map((r)=>Number(r.id)));
+      this.selectedIds = this.selectedIds.filter((id)=>rowIds.has(Number(id)) || this.all.some((r)=>Number(r.id)===Number(id)));
+    },
+    boardItems(stage){
+      const source = (this.board.stages && this.board.stages[stage]) ? this.board.stages[stage] : [];
+      const q = (this.search || "").toLowerCase().trim();
+      return source.filter((r)=>{
+        const type = (r.type || "").toLowerCase();
+        const status = (r.status || "").toLowerCase();
+        if(this.filters.type && type !== this.filters.type) return false;
+        if(this.filters.status && status !== this.filters.status) return false;
+        if(q && !Object.values(r).join(" ").toLowerCase().includes(q)) return false;
+        return true;
+      });
+    },
+    calendarGroups(){
+      const groups = {};
+      for(const event of this.calendarEvents){
+        const key = event.due_date || "No Due Date";
+        if(!groups[key]) groups[key] = [];
+        groups[key].push(event);
+      }
+      return Object.keys(groups).sort().map((key)=>({date:key, items:groups[key]}));
+    },
+    isSelected(id){
+      const cid = Number(id || 0);
+      return cid > 0 && this.selectedIds.includes(cid);
+    },
+    toggleSelect(id, checked){
+      const cid = Number(id || 0);
+      if(!cid) return;
+      if(checked){
+        if(!this.selectedIds.includes(cid)) this.selectedIds.push(cid);
+      }else{
+        this.selectedIds = this.selectedIds.filter((x)=>Number(x)!==cid);
+      }
+    },
+    toggleAllVisible(checked){
+      const rowIds = this.rows.map((r)=>Number(r.id)).filter((id)=>id>0);
+      if(checked){
+        const merged = new Set(this.selectedIds);
+        for(const rid of rowIds) merged.add(rid);
+        this.selectedIds = Array.from(merged);
+      }else{
+        const rowSet = new Set(rowIds);
+        this.selectedIds = this.selectedIds.filter((id)=>!rowSet.has(Number(id)));
+      }
+    },
+    allVisibleSelected(){
+      if(!this.rows.length) return false;
+      return this.rows.every((r)=>this.selectedIds.includes(Number(r.id)));
+    },
+    clearSelection(){
+      this.selectedIds = [];
+      this.bulk = {status:"", follow_up_date:"", priority:""};
+    },
+    async applyBulk(){
+      if(!this.selectedIds.length) return;
+      const payload = {contact_ids: this.selectedIds};
+      if(this.bulk.status) payload.status = this.bulk.status;
+      if(this.bulk.follow_up_date) payload.follow_up_date = this.bulk.follow_up_date;
+      if(this.bulk.priority) payload.priority = this.bulk.priority;
+      if(!payload.status && !payload.follow_up_date && !payload.priority){
+        (window.appToast || alert)("Pick at least one bulk field", "error");
+        return;
+      }
+      const out = await fetch("/api/m/crm/bulk-update", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Bulk update failed", "error");
+        return;
+      }
+      this.loaded = false;
+      await this.load(true);
+      if(this.selected && this.selected.id){
+        await this.select(this.selected.id);
+      }
+      (window.appToast || alert)(`Updated ${out.updated_count || 0} contacts`, "success");
+      try{ localStorage.setItem("mDashboardRefreshAt", String(Date.now())); }catch(_){}
+    },
+    detailHref(row){
+      if(!row) return "";
+      if((row.type || "").toLowerCase()==="chapter" && row.chapter_id){
+        return `/chapters/${encodeURIComponent(row.chapter_id)}`;
+      }
+      if((row.type || "").toLowerCase()==="vendor"){
+        if(row.vendor_id) return `/vendors/detail?vendor_id=${row.vendor_id}`;
+        if(row.name) return `/vendors/detail?vendor_name=${encodeURIComponent(row.name)}`;
+      }
+      return "";
+    },
+    async select(id){
+      const cid = Number(id || 0);
+      if(!cid) return;
+      const row = this.all.find((r)=>Number(r.id)===cid);
+      if(row) this.selected = row;
+      this.detailLoading = true;
+      try{
+        const out = await fetch(`/api/m/crm/contact?contact_id=${cid}`).then(r=>r.json());
+        if(!out.ok) return;
+        this.selected = out.contact || this.selected;
+        this.detail = {
+          notes: out.notes || [],
+          tasks: out.tasks || [],
+          timeline: out.timeline || [],
+          tags: out.tags || [],
+        };
+        this.form = {
+          status: this.selected.status || "prospect",
+          notes: this.selected.notes || "",
+          follow_up_date: this.selected.follow_up_date || "",
+          expected_close_date: this.selected.expected_close_date || "",
+          priority: this.selected.priority || "normal",
+          value_estimate: this.selected.value_estimate || "",
+        };
+      }finally{
+        this.detailLoading = false;
+      }
+    },
+    async saveContact(){
+      if(!this.selected || !this.selected.id) return;
+      const out = await fetch("/api/m/crm/update", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          contact_id: this.selected.id,
+          status: this.form.status,
+          notes: this.form.notes,
+          follow_up_date: this.form.follow_up_date,
+          expected_close_date: this.form.expected_close_date,
+          priority: this.form.priority,
+          value_estimate: this.form.value_estimate,
+        }),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not save contact", "error");
+        return;
+      }
+      this.loaded = false;
+      await this.load(true);
+      await this.select(this.selected.id);
+      (window.appToast || alert)("Contact updated", "success");
+      try{ localStorage.setItem("mDashboardRefreshAt", String(Date.now())); }catch(_){}
+    },
+    async addNote(){
+      if(!this.selected || !this.selected.id || !this.newNote.trim()) return;
+      const out = await fetch("/api/m/crm/note", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({contact_id: this.selected.id, note: this.newNote.trim()}),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not add note", "error");
+        return;
+      }
+      this.newNote = "";
+      this.loaded = false;
+      await this.load(true);
+      await this.select(this.selected.id);
+      (window.appToast || alert)("Note saved", "success");
+    },
+    async addTask(){
+      if(!this.selected || !this.selected.id || !this.newTask.title.trim()) return;
+      const out = await fetch("/api/m/crm/task", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          contact_id: this.selected.id,
+          title: this.newTask.title.trim(),
+          due_date: this.newTask.due_date,
+          priority: this.newTask.priority,
+        }),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not add task", "error");
+        return;
+      }
+      this.newTask = {title:"", due_date:"", priority:"normal"};
+      this.loaded = false;
+      await this.load(true);
+      await this.select(this.selected.id);
+      (window.appToast || alert)("Task added", "success");
+    },
+    async toggleTask(task){
+      const toDone = (task.status || "").toLowerCase() !== "done";
+      const out = await fetch("/api/m/crm/task/complete", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({task_id: task.id, completed: toDone}),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not update task", "error");
+        return;
+      }
+      this.loaded = false;
+      await this.load(true);
+      await this.select(this.selected.id);
+      (window.appToast || alert)("Task updated", "success");
+    },
+  });
+  const params = new URLSearchParams(window.location.search || "");
+  const contactIdRaw = params.get("contact_id") || "";
+  if (/^\d+$/.test(contactIdRaw)){
+    Alpine.store("crm").pendingContactId = Number(contactIdRaw);
+  }
+  const viewRaw = (params.get("view") || "").toLowerCase();
+  if (["board", "table", "calendar"].includes(viewRaw)){
+    Alpine.store("crm").view = viewRaw;
+  }
+});
+</script>
+{% endblock %}

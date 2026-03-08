@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signup - Greek Chapters CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#ecf6ff;
+      --line:#bfd6fb;
+      --text:#16365f;
+      --muted:#5675a6;
+      --brand:#2e7dff;
+      --brand-strong:#1a66ed;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family:"Manrope","Segoe UI",sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(70rem 34rem at -8% -20%, rgba(72,149,255,.34), transparent 45%),
+        radial-gradient(65rem 30rem at 112% 12%, rgba(125,193,255,.30), transparent 45%),
+        linear-gradient(180deg, #f4f9ff, var(--bg));
+      display:grid;
+      place-items:center;
+      padding:16px;
+    }
+    .card{
+      width:min(560px, 96vw);
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, #ffffff, #f7fbff);
+      border-radius:22px;
+      box-shadow:0 22px 44px rgba(32,78,152,.16);
+      padding:22px;
+      display:grid;
+      gap:12px;
+    }
+    .title{ margin:0; font-size:1.35rem; font-weight:800; letter-spacing:-.01em; }
+    .subtitle{ color:var(--muted); font-size:.9rem; }
+    .grid{ display:grid; gap:10px; grid-template-columns:1fr; }
+    @media (min-width:640px){ .grid{ grid-template-columns:1fr 1fr; } }
+    .field{ display:grid; gap:5px; font-size:.9rem; font-weight:600; }
+    .field input{
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 12px;
+      font:inherit;
+      color:#133b6f;
+      background:#fff;
+    }
+    .field input:focus{
+      outline:none;
+      border-color:#75aeff;
+      box-shadow:0 0 0 3px rgba(46,125,255,.20);
+    }
+    .wide{ grid-column:1/-1; }
+    .btn{
+      border:1px solid var(--brand);
+      background:linear-gradient(180deg, var(--brand), var(--brand-strong));
+      color:#fff;
+      font:inherit;
+      font-weight:700;
+      border-radius:12px;
+      padding:10px 12px;
+      cursor:pointer;
+    }
+    .btn:hover{ filter:brightness(1.03); }
+    .error{
+      border:1px solid #ffc9d5;
+      background:#fff2f6;
+      color:#b03756;
+      border-radius:10px;
+      padding:8px 10px;
+      font-size:.84rem;
+    }
+    a{ color:#165fd6; font-weight:700; text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+  </style>
+</head>
+<body>
+  <form method="post" class="card">
+    <h1 class="title">Create Manufacturer Workspace</h1>
+    <div class="subtitle">Set up your private CRM data space and start tracking chapters and vendors.</div>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <div class="grid">
+      <label class="field">Username
+        <input name="username" required>
+      </label>
+      <label class="field">Password
+        <input name="password" type="password" required>
+      </label>
+      <label class="field wide">Manufacturer Name
+        <input name="manufacturer_name" required>
+      </label>
+      <label class="field wide">Contact Email
+        <input name="contact_email" type="email">
+      </label>
+    </div>
+    <button class="btn" type="submit">Create Workspace</button>
+    <div class="subtitle">Already have an account? <a href="/login">Login</a></div>
+  </form>
+</body>
+</html>

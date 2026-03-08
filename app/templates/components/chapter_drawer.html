@@ -1,0 +1,58 @@
+{% if not chapter %}
+  <div class="text-sm text-slate-500">Chapter not found.</div>
+{% else %}
+  <div class="space-y-4">
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500">Selected Chapter</div>
+      <h3 class="text-lg font-semibold">{{ chapter.orgName }} - {{ chapter.chapterName }}</h3>
+      <a href="/chapters/{{ chapter.encodedId }}" class="text-sm text-blue-700 hover:underline">Open full detail view</a>
+    </div>
+    <div class="flex gap-2">
+      <button
+        type="button"
+        class="btn-ghost px-3 py-1.5 text-xs"
+        onclick='addChapterFromDrawer("prospect", {{ chapter.id|tojson }}, {{ chapter.chapterName|tojson }}, {{ chapter.orgName|tojson }}, {{ chapter.school|tojson }}, {{ chapter.city|tojson }}, {{ chapter.state|tojson }})'
+      >
+        Add as prospect
+      </button>
+      <button
+        type="button"
+        class="btn-ghost px-3 py-1.5 text-xs"
+        onclick='addChapterFromDrawer("served", {{ chapter.id|tojson }}, {{ chapter.chapterName|tojson }}, {{ chapter.orgName|tojson }}, {{ chapter.school|tojson }}, {{ chapter.city|tojson }}, {{ chapter.state|tojson }})'
+      >
+        Add as served
+      </button>
+    </div>
+    <dl class="grid grid-cols-[90px_1fr] gap-x-3 gap-y-1 text-sm">
+      <dt class="text-slate-500">School</dt><dd>{{ chapter.school or "-" }}</dd>
+      <dt class="text-slate-500">City</dt><dd>{{ chapter.city or "-" }}</dd>
+      <dt class="text-slate-500">State</dt><dd>{{ chapter.state or "-" }}</dd>
+      <dt class="text-slate-500">Initiated</dt><dd>{{ chapter.initiatedYear or chapter.foundedYear or "-" }}</dd>
+      <dt class="text-slate-500">Status</dt><dd>{{ chapter.status or "-" }}</dd>
+      <dt class="text-slate-500">Vendors</dt><dd>{{ chapter.vendorCount or 0 }}</dd>
+    </dl>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Campus Leads</div>
+      <div class="space-y-2 max-h-56 overflow-auto">
+        {% for r in campus %}
+          <a href="/chapters/{{ r.encodedId }}" class="block rounded-xl border border-slate-200 p-2 text-sm hover:bg-slate-50">{{ r.orgCode }} - {{ r.chapterName }}</a>
+        {% else %}
+          <div class="text-sm text-slate-500">No same-campus chapters found.</div>
+        {% endfor %}
+      </div>
+    </div>
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Vendors Serving {{ chapter.orgName }}</div>
+      <div class="space-y-2 max-h-56 overflow-auto">
+        {% for v in chapter.vendors %}
+          <div class="rounded-xl border border-slate-200 p-2 text-sm">
+            <div class="font-medium">{{ v.vendor or "-" }}</div>
+            <div class="text-xs text-slate-500">{{ v.category or "-" }} | {{ v.city or "-" }}, {{ v.state or "-" }}</div>
+          </div>
+        {% else %}
+          <div class="text-sm text-slate-500">No matched vendors found.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}

@@ -1,0 +1,28 @@
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local runtime/temp
+.test_tmp/
+.uvcache/
+
+# Local databases and secrets
+*.db
+*.sqlite
+*.sqlite3
+.env
+greek_chapters.csv
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

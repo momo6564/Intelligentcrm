@@ -1,0 +1,138 @@
+{% extends "layouts/app_shell.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_subtitle %}Served footprint and clickable detail lists{% endblock %}
+{% block content %}
+  {% if error %}
+    <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-800">{{ error }}</div>
+  {% endif %}
+
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Total Schools Served</div>
+      <div class="text-2xl font-semibold">{{ metrics.schools_served or 0 }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Total Organizations Served</div>
+      <div class="text-2xl font-semibold">{{ metrics.orgs_served or 0 }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Total Chapters Served</div>
+      <div class="text-2xl font-semibold">{{ metrics.chapters_served or 0 }}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Total Vendors Served</div>
+      <div class="text-2xl font-semibold">{{ metrics.vendors_served or 0 }}</div>
+    </div>
+  </div>
+
+  <div class="grid lg:grid-cols-2 gap-4">
+    <div class="panel p-4">
+      <h3 class="font-semibold mb-3">Schools Served</h3>
+      <div class="space-y-2 max-h-[24rem] overflow-auto">
+        {% for row in schools_served %}
+          <div class="rounded-xl border border-slate-200 p-3">
+            <div class="text-sm font-medium">{{ row.school }}</div>
+            <div class="text-xs text-slate-500">Chapters Served: {{ row.chapters_count }} | Organizations: {{ row.org_count }}</div>
+            <div class="text-xs text-slate-400 mt-1">{{ row.states or "-" }}</div>
+          </div>
+        {% else %}
+          <div class="text-sm text-slate-500">No schools served yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel p-4">
+      <h3 class="font-semibold mb-3">Organizations Served</h3>
+      <div class="space-y-2 max-h-[24rem] overflow-auto">
+        {% for row in orgs_served %}
+          <div class="rounded-xl border border-slate-200 p-3">
+            <div class="text-sm font-medium">{{ row.org }}</div>
+            <div class="text-xs text-slate-500">{{ row.org_type }} | Chapters: {{ row.chapters_count }} | Vendors: {{ row.vendors_count }}</div>
+          </div>
+        {% else %}
+          <div class="text-sm text-slate-500">No organizations served yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel p-4">
+      <h3 class="font-semibold mb-3">Chapters Served</h3>
+      <div class="space-y-2 max-h-[24rem] overflow-auto">
+        {% for row in chapters_served %}
+          {% if row.encodedId %}
+            <a class="block rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition" href="/chapters/{{ row.encodedId }}">
+              <div class="text-sm font-medium">{{ row.org or "-" }} - {{ row.name or row.chapter_id or "-" }}</div>
+              <div class="text-xs text-slate-500">{{ row.school or "-" }} | {{ row.city or "-" }}, {{ row.state or "-" }}</div>
+              <div class="text-xs text-slate-400 mt-1">{{ row.added_at }}</div>
+            </a>
+          {% else %}
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="text-sm font-medium">{{ row.org or "-" }} - {{ row.name or row.chapter_id or "-" }}</div>
+              <div class="text-xs text-slate-500">{{ row.school or "-" }} | {{ row.city or "-" }}, {{ row.state or "-" }}</div>
+              <div class="text-xs text-slate-400 mt-1">{{ row.added_at }}</div>
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="text-sm text-slate-500">No chapters served yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel p-4">
+      <h3 class="font-semibold mb-3">Vendors Served</h3>
+      <div class="space-y-2 max-h-[24rem] overflow-auto">
+        {% for row in vendors_served %}
+          <a class="block rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition" href="{{ row.detail_href }}">
+            <div class="text-sm font-medium">{{ row.name or "-" }}</div>
+            <div class="text-xs text-slate-500">{{ row.org or "-" }} | {{ row.products or "-" }}</div>
+            <div class="text-xs text-slate-500">{{ row.city or "-" }}, {{ row.state or "-" }}</div>
+            <div class="text-xs text-slate-400 mt-1">{{ row.added_at }}</div>
+          </a>
+        {% else %}
+          <div class="text-sm text-slate-500">No vendors served yet.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel p-4">
+      <h3 class="font-semibold mb-3">Needs Follow-up</h3>
+      <div class="space-y-2 max-h-[24rem] overflow-auto">
+        {% for row in needs_follow_up %}
+          <a class="block rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition" href="/crm?contact_id={{ row.contact_id }}">
+            <div class="text-sm font-medium">{{ row.name or "-" }}</div>
+            <div class="text-xs text-slate-500">{{ row.type or "-" }} | {{ row.label }}</div>
+            <div class="text-xs text-slate-500">Due: {{ row.due_date or "-" }} | Priority: {{ row.priority or "normal" }}</div>
+          </a>
+        {% else %}
+          <div class="text-sm text-slate-500">No overdue or due-today follow-ups.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="panel p-4">
+      <h3 class="font-semibold mb-3">Recent Activity</h3>
+      <div class="space-y-2 max-h-[24rem] overflow-auto">
+        {% for row in recent_activity %}
+          {% if row.contact_id %}
+            <a class="block rounded-xl border border-slate-200 p-3 hover:bg-slate-50 transition" href="/crm?contact_id={{ row.contact_id }}">
+              <div class="text-sm font-medium">{{ row.name or "-" }}</div>
+              <div class="text-xs text-slate-500 capitalize">{{ row.action|replace("_", " ") }}</div>
+              <div class="text-xs text-slate-500">{{ row.detail or "-" }}</div>
+              <div class="text-xs text-slate-400 mt-1">{{ row.created_at }}</div>
+            </a>
+          {% else %}
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="text-sm font-medium">{{ row.name or "-" }}</div>
+              <div class="text-xs text-slate-500 capitalize">{{ row.action|replace("_", " ") }}</div>
+              <div class="text-xs text-slate-500">{{ row.detail or "-" }}</div>
+              <div class="text-xs text-slate-400 mt-1">{{ row.created_at }}</div>
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="text-sm text-slate-500">No recent CRM activity.</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

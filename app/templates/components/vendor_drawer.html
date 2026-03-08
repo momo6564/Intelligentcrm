@@ -1,0 +1,39 @@
+{% if not vendor %}
+  <div class="text-sm text-slate-500">Vendor not found.</div>
+{% else %}
+  <div class="space-y-4">
+    <div>
+      <div class="text-xs uppercase tracking-wide text-slate-500">Selected Vendor</div>
+      <h3 class="text-lg font-semibold">{{ vendor.vendor }}</h3>
+    </div>
+    <div class="flex gap-2">
+      <button
+        type="button"
+        class="btn-ghost px-3 py-1.5 text-xs"
+        onclick='addVendorFromDrawer("prospect", {{ vendor.id|tojson }}, {{ vendor.vendor|tojson }}, {{ vendor.organization|tojson }})'
+      >
+        Add as prospect
+      </button>
+      <button
+        type="button"
+        class="btn-ghost px-3 py-1.5 text-xs"
+        onclick='addVendorFromDrawer("served", {{ vendor.id|tojson }}, {{ vendor.vendor|tojson }}, {{ vendor.organization|tojson }})'
+      >
+        Add as served
+      </button>
+    </div>
+    <dl class="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-sm">
+      <dt class="text-slate-500">Organization</dt><dd>{{ vendor.organization or "-" }}</dd>
+      <dt class="text-slate-500">Category</dt><dd>{{ vendor.category or "-" }}</dd>
+      <dt class="text-slate-500">City</dt><dd>{{ vendor.city or "-" }}</dd>
+      <dt class="text-slate-500">State</dt><dd>{{ vendor.state or "-" }}</dd>
+      <dt class="text-slate-500">Email</dt><dd>{{ vendor.email or "-" }}</dd>
+      <dt class="text-slate-500">Website</dt>
+      <dd>
+        {% if vendor.website %}
+          <a href="{{ vendor.website }}" target="_blank" rel="noopener" class="text-blue-700 hover:underline">{{ vendor.website }}</a>
+        {% else %}-{% endif %}
+      </dd>
+    </dl>
+  </div>
+{% endif %}
