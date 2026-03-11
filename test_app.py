@@ -46,6 +46,8 @@ class AppTests(unittest.TestCase):
                 "password": password,
                 "manufacturer_name": manufacturer_name,
                 "contact_email": f"{username}@example.com",
+                "security_question": Config.SECURITY_QUESTIONS[0],
+                "security_answer": "TestAnswer123",
             },
             follow_redirects=False,
         )
@@ -269,10 +271,10 @@ class AppTests(unittest.TestCase):
         self._login("demo", "demo123")
         chapters_seed = self.client.get("/api/chapters").get_json()
         self.assertTrue(chapters_seed.get("ok"))
-        seed_rows = chapters_seed.get("rows", [])
+        seed_rows = chapters_seed.get("results", [])
         chapter_id = seed_rows[0]["id"] if seed_rows else ""
-        chapter_name = (seed_rows[0].get("chapterName") if seed_rows else "") or "Meta Chapter"
-        org_name = (seed_rows[0].get("orgName") if seed_rows else "") or "Alpha Phi Alpha"
+        chapter_name = (seed_rows[0].get("chapter_name") if seed_rows else "") or "Meta Chapter"
+        org_name = (seed_rows[0].get("organization") if seed_rows else "") or "Alpha Phi Alpha"
         vendor_name = f"Meta Vendor {uuid.uuid4().hex[:6]}"
         if chapter_id:
             self.client.post(
@@ -296,14 +298,14 @@ class AppTests(unittest.TestCase):
         chapters_payload = self.client.get("/api/chapters").get_json()
         self.assertTrue(chapters_payload.get("ok"))
         if chapter_id:
-            chapter_row = next((r for r in chapters_payload.get("rows", []) if r.get("id") == chapter_id), None)
+            chapter_row = next((r for r in chapters_payload.get("results", []) if r.get("id") == chapter_id), None)
             self.assertIsNotNone(chapter_row)
             self.assertIn("crm_stage", chapter_row)
             self.assertIn("open_task_count", chapter_row)
 
-        vendors_payload = self.client.get("/api/vendors").get_json()
+        vendors_payload = self.client.get(f"/api/vendors?q={vendor_name}").get_json()
         self.assertTrue(vendors_payload.get("ok"))
-        vendor_row = next((r for r in vendors_payload.get("rows", []) if (r.get("vendor") or "").lower() == vendor_name.lower()), None)
+        vendor_row = next((r for r in vendors_payload.get("results", []) if (r.get("vendor") or "").lower() == vendor_name.lower()), None)
         if vendor_row is not None:
             self.assertIn("crm_stage", vendor_row)
             self.assertIn("open_task_count", vendor_row)
