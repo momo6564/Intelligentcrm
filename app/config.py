@@ -4,11 +4,25 @@ class Config:
     SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
     DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "greek_chapters.db")
     VENDOR_CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "greekvendorhub_refined.csv")
+    COLLEGIATE_VENDOR_CSV_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ab_vendordata.csv")
+    INSTITUTIONS_CSV_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "data",
+        "Spreadsheet Of All Colleges And Universities export 2026-03-10 12-13-20.csv",
+    )
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV", "").lower() == "production"
     
     LEAD_STAGES = {"prospect", "contacted", "responded", "negotiating", "won", "lost"}
+    SECURITY_QUESTIONS = [
+        "What was the name of your first school?",
+        "What is your mother’s maiden name?",
+        "What was the name of your first pet?",
+        "What is the name of the city where you were born?",
+        "What is your favorite book?",
+        "What is the name of your favorite teacher?",
+    ]
 
     ORG_MAP = {
         "AKA": ("Alpha Kappa Alpha", "Sorority"),

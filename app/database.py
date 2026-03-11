@@ -6,6 +6,16 @@ from flask import g
 from werkzeug.security import generate_password_hash
 from .config import Config
 from .utils.text_utils import clean_text, norm_state, norm_org
+from .utils.data_parse import (
+    parse_meta_from_file,
+    detect_status,
+    detect_year,
+    detect_school,
+    detect_chapter,
+    detect_chapter_id,
+    detect_notes,
+    parse_location,
+)
 
 def get_connection() -> sqlite3.Connection:
     if 'db' not in g:
@@ -294,6 +304,10 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN manufacturer_id INTEGER")
     if "workspace_id" not in users_columns:
         conn.execute("ALTER TABLE users ADD COLUMN workspace_id TEXT")
+    if "security_question" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN security_question TEXT")
+    if "security_answer_hash" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN security_answer_hash TEXT")
     crm_contact_columns = {row[1] for row in conn.execute("PRAGMA table_info(crm_contacts)").fetchall()}
     if "workspace_id" not in crm_contact_columns:
         conn.execute("ALTER TABLE crm_contacts ADD COLUMN workspace_id TEXT")
@@ -572,50 +586,492 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
             state TEXT,
             category TEXT,
             email TEXT,
+            phone TEXT,
             organization_norm TEXT,
-            state_norm TEXT
+            state_norm TEXT,
+            license_label TEXT,
+            is_greek_licensed INTEGER DEFAULT 0,
+            is_collegiate INTEGER DEFAULT 0
         )
         """
     )
 
-    if not os.path.exists(Config.VENDOR_CSV_PATH):
+    vendor_columns = {row[1] for row in conn.execute("PRAGMA table_info(vendors)").fetchall()}
+    if "phone" not in vendor_columns:
+        conn.execute("ALTER TABLE vendors ADD COLUMN phone TEXT")
+    if "license_label" not in vendor_columns:
+        conn.execute("ALTER TABLE vendors ADD COLUMN license_label TEXT")
+    if "is_greek_licensed" not in vendor_columns:
+        conn.execute("ALTER TABLE vendors ADD COLUMN is_greek_licensed INTEGER DEFAULT 0")
+    if "is_collegiate" not in vendor_columns:
+        conn.execute("ALTER TABLE vendors ADD COLUMN is_collegiate INTEGER DEFAULT 0")
+
+    greek_exists = os.path.exists(Config.VENDOR_CSV_PATH)
+    collegiate_exists = os.path.exists(Config.COLLEGIATE_VENDOR_CSV_PATH)
+    if not greek_exists and not collegiate_exists:
         return
 
-    file_mtime = str(os.path.getmtime(Config.VENDOR_CSV_PATH))
-    prev = conn.execute("SELECT value FROM app_meta WHERE key='vendors_csv_mtime'").fetchone()
+    greek_mtime = str(os.path.getmtime(Config.VENDOR_CSV_PATH)) if greek_exists else ""
+    collegiate_mtime = str(os.path.getmtime(Config.COLLEGIATE_VENDOR_CSV_PATH)) if collegiate_exists else ""
+    prev_greek = conn.execute("SELECT value FROM app_meta WHERE key='vendors_csv_mtime'").fetchone()
+    prev_collegiate = conn.execute("SELECT value FROM app_meta WHERE key='collegiate_vendors_csv_mtime'").fetchone()
+    if prev_greek and prev_collegiate:
+        if (prev_greek[0] or "") == greek_mtime and (prev_collegiate[0] or "") == collegiate_mtime:
+            return
+
+    def split_city_state(value: str) -> tuple[str, str]:
+        raw = clean_text(value)
+        if not raw:
+            return "", ""
+        if "," in raw:
+            city, state = raw.rsplit(",", 1)
+            return city.strip(), state.strip()
+        return raw, ""
+
+    def license_label(greek_flag: bool, collegiate_flag: bool) -> str:
+        if greek_flag and collegiate_flag:
+            return "Greek Licensed Holding + Collegiate Vendor"
+        if greek_flag:
+            return "Greek Licensed Holding"
+        if collegiate_flag:
+            return "Collegiate Vendor"
+        return ""
+
+    conn.execute("DELETE FROM vendors")
+
+    vendor_flags = {}
+    records = []
+
+    if greek_exists:
+        with open(Config.VENDOR_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                vendor = clean_text(row.get("Vendor"))
+                organization = clean_text(row.get("Organization"))
+                reg_count_raw = clean_text(row.get("RegisteredOrgCount"))
+                reg_count = int(reg_count_raw) if reg_count_raw.isdigit() else None
+                website = clean_text(row.get("Website"))
+                city = clean_text(row.get("City"))
+                state = norm_state(row.get("State")) or clean_text(row.get("State"))
+                category = clean_text(row.get("Category"))
+                email = clean_text(row.get("Email"))
+                vendor_norm = clean_text(vendor).lower()
+                if vendor_norm:
+                    vendor_flags.setdefault(vendor_norm, {"greek": False, "collegiate": False})
+                    vendor_flags[vendor_norm]["greek"] = True
+                records.append(
+                    {
+                        "vendor": vendor,
+                        "organization": organization,
+                        "registered_org_count": reg_count,
+                        "website": website,
+                        "city": city,
+                        "state": state,
+                        "category": category,
+                        "email": email,
+                        "phone": "",
+                        "organization_norm": norm_org(organization),
+                        "state_norm": norm_state(state),
+                        "vendor_norm": vendor_norm,
+                    }
+                )
+
+    if collegiate_exists:
+        with open(Config.COLLEGIATE_VENDOR_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                vendor = clean_text(row.get("nobull"))
+                city_state_raw = clean_text(row.get("nobull 2"))
+                phone = clean_text(row.get("nobull 3"))
+                website_text = clean_text(row.get("nobull 4"))
+                website_url = clean_text(row.get("nobull href"))
+                email = clean_text(row.get("nobull 5"))
+                email_url = clean_text(row.get("nobull href 2"))
+                notes = clean_text(row.get("nobull 6"))
+                if not any([vendor, city_state_raw, phone, website_text, website_url, email, email_url, notes]):
+                    continue
+                city, state_raw = split_city_state(city_state_raw)
+                state = norm_state(state_raw) or clean_text(state_raw)
+                website = website_url or website_text
+                vendor_norm = clean_text(vendor).lower()
+                if vendor_norm:
+                    vendor_flags.setdefault(vendor_norm, {"greek": False, "collegiate": False})
+                    vendor_flags[vendor_norm]["collegiate"] = True
+                records.append(
+                    {
+                        "vendor": vendor,
+                        "organization": "",
+                        "registered_org_count": None,
+                        "website": website,
+                        "city": city,
+                        "state": state,
+                        "category": "",
+                        "email": email,
+                        "phone": phone,
+                        "organization_norm": "",
+                        "state_norm": norm_state(state),
+                        "vendor_norm": vendor_norm,
+                    }
+                )
+
+    merged = {}
+    for rec in records:
+        vendor_norm = rec.get("vendor_norm") or ""
+        state_norm = clean_text(rec.get("state_norm"))
+        city_norm = clean_text(rec.get("city")).lower()
+        key = (vendor_norm, state_norm, city_norm)
+        if key not in merged:
+            merged[key] = dict(rec)
+            continue
+        current = merged[key]
+        for field in ["organization", "website", "city", "state", "category", "email"]:
+            if not clean_text(current.get(field)) and clean_text(rec.get(field)):
+                current[field] = rec.get(field)
+        if not clean_text(current.get("phone")) and clean_text(rec.get("phone")):
+            current["phone"] = rec.get("phone")
+        if current.get("registered_org_count") is None and rec.get("registered_org_count") is not None:
+            current["registered_org_count"] = rec.get("registered_org_count")
+        if not clean_text(current.get("organization_norm")) and clean_text(rec.get("organization_norm")):
+            current["organization_norm"] = rec.get("organization_norm")
+        if not clean_text(current.get("state_norm")) and clean_text(rec.get("state_norm")):
+            current["state_norm"] = rec.get("state_norm")
+
+    batch = []
+    for rec in merged.values():
+        vendor_norm = rec.get("vendor_norm") or ""
+        flags = vendor_flags.get(vendor_norm, {"greek": False, "collegiate": False})
+        greek_flag = bool(flags.get("greek"))
+        collegiate_flag = bool(flags.get("collegiate"))
+        batch.append(
+            (
+                rec.get("vendor"),
+                rec.get("organization"),
+                rec.get("registered_org_count"),
+                rec.get("website"),
+                rec.get("city"),
+                rec.get("state"),
+                rec.get("category"),
+                rec.get("email"),
+                rec.get("phone"),
+                rec.get("organization_norm"),
+                rec.get("state_norm"),
+                license_label(greek_flag, collegiate_flag),
+                1 if greek_flag else 0,
+                1 if collegiate_flag else 0,
+            )
+        )
+
+    if batch:
+        conn.executemany(
+            """
+            INSERT INTO vendors
+            (vendor, organization, registered_org_count, website, city, state, category, email, phone, organization_norm, state_norm,
+             license_label, is_greek_licensed, is_collegiate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            batch,
+        )
+
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('vendors_csv_mtime', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (greek_mtime,),
+    )
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('collegiate_vendors_csv_mtime', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (collegiate_mtime,),
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vendor_name ON vendors(vendor)")
+    conn.commit()
+
+def ensure_institutions_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS institutions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dapip_id TEXT,
+            ope_id TEXT,
+            ipeds_unit_ids TEXT,
+            location_name TEXT,
+            parent_name TEXT,
+            parent_dapip_id TEXT,
+            location_type TEXT,
+            address TEXT,
+            street TEXT,
+            city TEXT,
+            state TEXT,
+            zip TEXT,
+            general_phone TEXT,
+            admin_name TEXT,
+            admin_phone TEXT,
+            admin_email TEXT,
+            fax TEXT,
+            update_date TEXT,
+            state_norm TEXT,
+            location_name_norm TEXT,
+            parent_name_norm TEXT
+        )
+        """
+    )
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(institutions)").fetchall()}
+    add_cols = [
+        ("street", "TEXT"),
+        ("city", "TEXT"),
+        ("state", "TEXT"),
+        ("zip", "TEXT"),
+        ("state_norm", "TEXT"),
+        ("location_name_norm", "TEXT"),
+        ("parent_name_norm", "TEXT"),
+    ]
+    for col, ctype in add_cols:
+        if col not in columns:
+            conn.execute(f"ALTER TABLE institutions ADD COLUMN {col} {ctype}")
+
+    if not os.path.exists(Config.INSTITUTIONS_CSV_PATH):
+        return
+
+    file_mtime = str(os.path.getmtime(Config.INSTITUTIONS_CSV_PATH))
+    prev = conn.execute("SELECT value FROM app_meta WHERE key='institutions_csv_mtime'").fetchone()
     if prev and prev[0] == file_mtime:
         return
 
-    conn.execute("DELETE FROM vendors")
-    with open(Config.VENDOR_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
+    def parse_address(raw: str) -> tuple[str, str, str, str]:
+        raw = clean_text(raw)
+        if not raw:
+            return "", "", "", ""
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        street = ""
+        city = ""
+        state = ""
+        zip_code = ""
+        state_zip = ""
+        if len(parts) >= 3:
+            street = ", ".join(parts[:-2]).strip()
+            city = parts[-2].strip()
+            state_zip = parts[-1].strip()
+        elif len(parts) == 2:
+            street = parts[0].strip()
+            state_zip = parts[1].strip()
+        else:
+            street = raw
+        if state_zip:
+            m = re.search(r"([A-Za-z]{2})\\s*(\\d{5}(?:-\\d{4})?)?", state_zip)
+            if m:
+                state_abbr = m.group(1).upper()
+                zip_code = m.group(2) or ""
+                state = norm_state(state_abbr) or state_abbr
+            else:
+                state = norm_state(state_zip) or state_zip
+        return street, city, state, zip_code
+
+    conn.execute("DELETE FROM institutions")
+    with open(Config.INSTITUTIONS_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f)
         batch = []
         for row in reader:
-            vendor = clean_text(row.get("Vendor"))
-            organization = clean_text(row.get("Organization"))
-            reg_count_raw = clean_text(row.get("RegisteredOrgCount"))
-            reg_count = int(reg_count_raw) if reg_count_raw.isdigit() else None
-            website = clean_text(row.get("Website"))
-            city = clean_text(row.get("City"))
-            state = norm_state(row.get("State")) or clean_text(row.get("State"))
-            category = clean_text(row.get("Category"))
-            email = clean_text(row.get("Email"))
+            location_name = clean_text(row.get("LocationName"))
+            parent_name = clean_text(row.get("ParentName"))
+            address = clean_text(row.get("Address"))
+            street, city, state, zip_code = parse_address(address)
+            state_norm = norm_state(state) or clean_text(state)
             batch.append(
-                (vendor, organization, reg_count, website, city, state, category, email, norm_org(organization), norm_state(state))
+                (
+                    clean_text(row.get("DapipId")),
+                    clean_text(row.get("OpeId")),
+                    clean_text(row.get("IpedsUnitIds")),
+                    location_name,
+                    parent_name,
+                    clean_text(row.get("ParentDapipId")),
+                    clean_text(row.get("LocationType")),
+                    address,
+                    street,
+                    city,
+                    state,
+                    zip_code,
+                    clean_text(row.get("GeneralPhone")),
+                    clean_text(row.get("AdminName")),
+                    clean_text(row.get("AdminPhone")),
+                    clean_text(row.get("AdminEmail")),
+                    clean_text(row.get("Fax")),
+                    clean_text(row.get("UpdateDate")),
+                    state_norm,
+                    norm_org(location_name),
+                    norm_org(parent_name),
+                )
             )
 
     conn.executemany(
         """
-        INSERT INTO vendors
-        (vendor, organization, registered_org_count, website, city, state, category, email, organization_norm, state_norm)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO institutions
+        (dapip_id, ope_id, ipeds_unit_ids, location_name, parent_name, parent_dapip_id, location_type, address,
+         street, city, state, zip, general_phone, admin_name, admin_phone, admin_email, fax, update_date,
+         state_norm, location_name_norm, parent_name_norm)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         batch,
     )
     conn.execute(
-        "INSERT INTO app_meta(key, value) VALUES('vendors_csv_mtime', ?) "
+        "INSERT INTO app_meta(key, value) VALUES('institutions_csv_mtime', ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (file_mtime,),
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_name ON institutions(location_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_state ON institutions(state)")
+    conn.commit()
+
+def ensure_chapters_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+        """
+    )
+
+    def table_columns(table_name: str) -> list[str]:
+        return [row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+
+    raw_cols = table_columns("chapters")
+    if raw_cols and "chapter_uid" not in raw_cols and ("source_file" in raw_cols or "row_number" in raw_cols):
+        conn.execute("ALTER TABLE chapters RENAME TO chapters_raw")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chapters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chapter_uid TEXT UNIQUE,
+            institution_id INTEGER,
+            chapter_name TEXT,
+            organization TEXT,
+            school TEXT,
+            city TEXT,
+            state TEXT,
+            instagram TEXT,
+            chapter_id TEXT,
+            status TEXT,
+            founded_year INTEGER,
+            notes TEXT,
+            org_code TEXT,
+            entity_type TEXT,
+            scope TEXT,
+            source_file TEXT,
+            row_number TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_inst ON chapters(institution_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_org ON chapters(organization)")
+
+    raw_exists = bool(table_columns("chapters_raw"))
+    if not raw_exists:
+        return
+
+    raw_count = conn.execute("SELECT COUNT(*) FROM chapters_raw").fetchone()[0]
+    prev_count_row = conn.execute("SELECT value FROM app_meta WHERE key='chapters_raw_count'").fetchone()
+    prev_count = int(prev_count_row[0]) if prev_count_row and str(prev_count_row[0]).isdigit() else -1
+    existing_count = conn.execute("SELECT COUNT(*) FROM chapters").fetchone()[0]
+    if existing_count > 0 and raw_count == prev_count:
+        return
+
+    ensure_institutions_table(conn)
+    inst_rows = conn.execute("SELECT id, location_name FROM institutions").fetchall()
+    inst_lookup = {}
+    for row in inst_rows:
+        name_norm = norm_org(row["location_name"])
+        if name_norm and name_norm not in inst_lookup:
+            inst_lookup[name_norm] = int(row["id"])
+
+    conn.execute("DELETE FROM chapters")
+    data_columns = [c for c in table_columns("chapters_raw") if c not in {"id"}]
+    select_sql = "SELECT " + ", ".join([f'\"{c}\"' for c in data_columns]) + " FROM chapters_raw"
+    chapter_rows = conn.execute(select_sql).fetchall()
+    batch = []
+    for r in chapter_rows:
+        source_file = clean_text(r["source_file"]) if "source_file" in r.keys() else ""
+        row_number = clean_text(r["row_number"]) if "row_number" in r.keys() else ""
+        org_code, org_name, entity_type, scope = parse_meta_from_file(source_file)
+
+        values: list[str] = []
+        for c in data_columns:
+            if c in {"source_file", "row_number"}:
+                continue
+            v = clean_text(r[c])
+            if v and v not in {"[", "]"} and not v.lower().startswith("http"):
+                values.append(v)
+
+        if not values:
+            continue
+
+        chapter_name = detect_chapter(values)
+        chapter_id = detect_chapter_id(values)
+        school = detect_school(values)
+        founded_year = detect_year(values)
+        status = detect_status(values)
+        notes = detect_notes(values)
+
+        city = ""
+        state = ""
+        for v in values:
+            if v in {chapter_name, school}:
+                continue
+            loc_city, loc_state = parse_location(v)
+            city = city or loc_city
+            state = state or loc_state
+
+        if not any([chapter_name, school, city, state, status, founded_year]):
+            continue
+
+        chapter_uid = f"{source_file}::{row_number}" if source_file or row_number else chapter_id or chapter_name
+        inst_id = inst_lookup.get(norm_org(school)) if school else None
+
+        batch.append(
+            (
+                chapter_uid,
+                inst_id,
+                chapter_name,
+                org_name,
+                school,
+                city,
+                state,
+                "",
+                chapter_id,
+                status,
+                int(founded_year) if str(founded_year).isdigit() else None,
+                notes,
+                org_code,
+                entity_type,
+                scope,
+                source_file,
+                row_number,
+            )
+        )
+
+    if batch:
+        conn.executemany(
+            """
+            INSERT INTO chapters
+            (chapter_uid, institution_id, chapter_name, organization, school, city, state, instagram, chapter_id,
+             status, founded_year, notes, org_code, entity_type, scope, source_file, row_number)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            batch,
+        )
+
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('chapters_raw_count', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (str(raw_count),),
     )
     conn.commit()
 

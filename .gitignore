@@ -22,6 +22,10 @@ env/
 *.sqlite3
 .env
 greek_chapters.csv
+data/*.csv
+data/*.xlsx
+data/*.zip
+*.localbak-*
 
 # OS/editor noise
 .DS_Store

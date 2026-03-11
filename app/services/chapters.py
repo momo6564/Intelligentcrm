@@ -23,7 +23,11 @@ def fetch_normalized_rows(force_refresh: bool = False) -> List[dict]:
     conn = get_connection()
     ensure_crm_tables(conn)
 
-    table_info = conn.execute("PRAGMA table_info(chapters)").fetchall()
+    table_name = "chapters_raw"
+    table_info = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    if not table_info:
+        table_name = "chapters"
+        table_info = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     columns = [row[1] for row in table_info]
     if not columns:
         return []
@@ -40,7 +44,7 @@ def fetch_normalized_rows(force_refresh: bool = False) -> List[dict]:
     org_vendor_lookup = {clean_text(r["organization_norm"]): int(r["c"]) for r in org_vendor_rows}
 
     data_columns = [c for c in columns if c not in {"id"}]
-    select_sql = "SELECT " + ", ".join([f'"{c}"' for c in data_columns]) + " FROM chapters"
+    select_sql = "SELECT " + ", ".join([f'"{c}"' for c in data_columns]) + f" FROM {table_name}"
     chapter_rows = conn.execute(select_sql).fetchall()
     out: List[dict] = []
     for r in chapter_rows:

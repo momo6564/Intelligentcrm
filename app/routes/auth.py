@@ -4,6 +4,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from ..database import get_connection, ensure_crm_tables, ensure_default_users, log_activity, derive_workspace_id
+from ..config import Config
 from ..utils.text_utils import clean_text
 
 bp = Blueprint('auth', __name__)
@@ -140,8 +141,12 @@ def signup_page():
         password = clean_text(request.form.get("password"))
         manufacturer_name = clean_text(request.form.get("manufacturer_name"))
         contact_email = clean_text(request.form.get("contact_email"))
-        if not username or not password or not manufacturer_name:
-            error = "username, password and manufacturer name are required."
+        security_question = clean_text(request.form.get("security_question"))
+        security_answer = clean_text(request.form.get("security_answer"))
+        if not username or not password or not manufacturer_name or not security_question or not security_answer:
+            error = "username, password, manufacturer name, security question and answer are required."
+        elif security_question not in Config.SECURITY_QUESTIONS:
+            error = "Invalid security question selection."
         else:
             conn = get_connection()
             ensure_crm_tables(conn)
@@ -173,6 +178,12 @@ def signup_page():
                 if "workspace_id" in users_columns:
                     cols.append("workspace_id")
                     vals.append(workspace_id)
+                if "security_question" in users_columns:
+                    cols.append("security_question")
+                    vals.append(security_question)
+                if "security_answer_hash" in users_columns:
+                    cols.append("security_answer_hash")
+                    vals.append(generate_password_hash(security_answer))
                     
                 query = f"INSERT INTO users ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
                 cur_user = conn.execute(query, tuple(vals))
@@ -190,7 +201,54 @@ def signup_page():
                 conn.commit()
                 session["user_id"] = user_id
                 return redirect(url_for("main.dashboard_page"))
-    return render_template("auth/signup.html", error=error)
+    return render_template("auth/signup.html", error=error, questions=Config.SECURITY_QUESTIONS)
+
+
+@bp.route("/reset-password", methods=["GET", "POST"])
+def reset_password_page():
+    error = ""
+    success = ""
+    if request.method == "POST":
+        username = clean_text(request.form.get("username"))
+        security_question = clean_text(request.form.get("security_question"))
+        security_answer = clean_text(request.form.get("security_answer"))
+        new_password = clean_text(request.form.get("new_password"))
+        if not username or not security_question or not security_answer or not new_password:
+            error = "All fields are required."
+        elif security_question not in Config.SECURITY_QUESTIONS:
+            error = "Invalid security question selection."
+        else:
+            conn = get_connection()
+            ensure_crm_tables(conn)
+            row = conn.execute(
+                """
+                SELECT id, security_question, security_answer_hash
+                FROM users
+                WHERE lower(username)=lower(?)
+                """,
+                (username,),
+            ).fetchone()
+            if not row:
+                error = "User not found."
+            elif not clean_text(row["security_question"]) or not clean_text(row["security_answer_hash"]):
+                error = "No security question set for this account."
+            elif clean_text(row["security_question"]) != security_question:
+                error = "Security question does not match."
+            elif not check_password_hash(clean_text(row["security_answer_hash"]), security_answer):
+                error = "Security answer is incorrect."
+            else:
+                conn.execute(
+                    "UPDATE users SET password_hash=? WHERE id=?",
+                    (generate_password_hash(new_password), int(row["id"])),
+                )
+                conn.commit()
+                success = "Password updated. You can now log in."
+    return render_template(
+        "auth/reset_password.html",
+        error=error,
+        success=success,
+        questions=Config.SECURITY_QUESTIONS,
+    )
 
 
 @bp.route("/logout")

@@ -26,12 +26,13 @@ def create_app(config_class=None):
         )
 
     # Register blueprints (to be implemented)
-    from .routes import main, auth, api, chapters, vendors
+    from .routes import main, auth, api, chapters, vendors, institutions
     app.register_blueprint(main.bp)
     app.register_blueprint(auth.bp)
     app.register_blueprint(api.bp)
     app.register_blueprint(chapters.bp)
     app.register_blueprint(vendors.bp)
+    app.register_blueprint(institutions.bp)
 
     from .database import close_connection
     app.teardown_appcontext(close_connection)

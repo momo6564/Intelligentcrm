@@ -6,7 +6,7 @@ from flask import Blueprint, request, jsonify, redirect, url_for, Response
 from urllib.parse import quote
 
 from ..auth import login_required, get_session_user
-from ..database import get_connection, ensure_crm_tables, ensure_vendor_table, log_activity, log_lead_activity
+from ..database import get_connection, ensure_crm_tables, ensure_vendor_table, ensure_institutions_table, ensure_chapters_table, log_activity, log_lead_activity
 from ..config import Config
 from ..services.dashboard import manufacturer_dashboard_snapshot, manufacturer_dashboard_dataset
 from ..services.chapters import fetch_normalized_rows, get_chapter_by_id
@@ -178,7 +178,7 @@ def api_m_vendors():
     
     rows = conn.execute(
         """
-        SELECT id, vendor, category, organization, state, website
+        SELECT id, vendor, category, organization, state, website, phone, license_label, is_greek_licensed, is_collegiate
         FROM vendors
         ORDER BY vendor ASC
         LIMIT 5000
@@ -1202,6 +1202,49 @@ def api_chapters():
         workspace_id = workspace_id_for_user(user)
         conn = get_connection()
         ensure_crm_tables(conn)
+        ensure_chapters_table(conn)
+
+        page_raw = clean_text(request.args.get("page"))
+        limit_raw = clean_text(request.args.get("limit"))
+        page = int(page_raw) if page_raw.isdigit() and int(page_raw) > 0 else 1
+        limit = int(limit_raw) if limit_raw.isdigit() and int(limit_raw) > 0 else 50
+        limit = min(limit, 50)
+        offset = (page - 1) * limit
+        q = clean_text(request.args.get("q")).lower()
+        org_filter = clean_text(request.args.get("organization"))
+        state_filter = clean_text(request.args.get("state"))
+        city_filter = clean_text(request.args.get("city"))
+        school_filter = clean_text(request.args.get("school"))
+
+        where = []
+        params = []
+        if q:
+            like = f"%{q}%"
+            where.append(
+                "("
+                "lower(chapter_name) LIKE ? OR lower(organization) LIKE ? OR "
+                "lower(school) LIKE ? OR lower(city) LIKE ? OR lower(state) LIKE ?"
+                ")"
+            )
+            params.extend([like, like, like, like, like])
+        if org_filter:
+            where.append("organization = ?")
+            params.append(org_filter)
+        if state_filter:
+            where.append("state = ?")
+            params.append(state_filter)
+        if city_filter:
+            where.append("city = ?")
+            params.append(city_filter)
+        if school_filter:
+            where.append("school = ?")
+            params.append(school_filter)
+
+        where_sql = " WHERE " + " AND ".join(where) if where else ""
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM chapters{where_sql}",
+            tuple(params),
+        ).fetchone()[0]
 
         crm_rows = conn.execute(
             """
@@ -1240,14 +1283,25 @@ def api_chapters():
         ).fetchall()
         served_set = {clean_text(r["chapter_id"]) for r in served_rows if clean_text(r["chapter_id"])}
 
-        rows = fetch_normalized_rows()
+        rows = conn.execute(
+            f"""
+            SELECT chapter_uid, chapter_name, organization, school, city, state, status, founded_year,
+                   institution_id, source_file, row_number
+            FROM chapters
+            {where_sql}
+            ORDER BY chapter_name ASC
+            LIMIT ? OFFSET ?
+            """,
+            tuple(params + [limit, offset]),
+        ).fetchall()
         out = []
         for r in rows:
-            chapter_id = clean_text(r.get("id"))
+            chapter_id = clean_text(r["chapter_uid"])
             crm_info = crm_map.get(chapter_id, {})
             crm_status = clean_text(crm_info.get("crm_stage"))
             contact_id = int(crm_info.get("crm_contact_id") or 0)
-            item = dict(r)
+            item = {k: r[k] for k in r.keys()}
+            item["id"] = chapter_id
             item["in_crm"] = bool(contact_id)
             item["crm_contact_id"] = contact_id or None
             item["crm_status"] = crm_status
@@ -1258,9 +1312,9 @@ def api_chapters():
             item["updated_at"] = clean_text(crm_info.get("updated_at"))
             item["served"] = chapter_id in served_set or crm_status == "closed"
             out.append(item)
-        return jsonify({"ok": True, "rows": out})
+        return jsonify({"ok": True, "results": out, "total": int(total), "page": page})
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc), "rows": []}), 500
+        return jsonify({"ok": False, "error": str(exc), "results": [], "total": 0, "page": 1}), 500
 
 @bp.route("/api/vendors")
 @login_required()
@@ -1308,12 +1362,62 @@ def api_vendors():
         (workspace_id,),
     ).fetchall()
     served_vendor_set = {clean_text(r["vendor_name"]) for r in served_vendor_rows if clean_text(r["vendor_name"])}
+    page_raw = clean_text(request.args.get("page"))
+    limit_raw = clean_text(request.args.get("limit"))
+    page = int(page_raw) if page_raw.isdigit() and int(page_raw) > 0 else 1
+    limit = int(limit_raw) if limit_raw.isdigit() and int(limit_raw) > 0 else 50
+    limit = min(limit, 50)
+    offset = (page - 1) * limit
+    q = clean_text(request.args.get("q")).lower()
+    org_filter = clean_text(request.args.get("organization"))
+    category_filter = clean_text(request.args.get("category"))
+    state_filter = clean_text(request.args.get("state"))
+    city_filter = clean_text(request.args.get("city"))
+    license_filter = clean_text(request.args.get("license"))
+
+    where = []
+    params = []
+    if q:
+        like = f"%{q}%"
+        where.append(
+            "("
+            "lower(vendor) LIKE ? OR lower(organization) LIKE ? OR lower(category) LIKE ? OR "
+            "lower(state) LIKE ? OR lower(city) LIKE ? OR lower(license_label) LIKE ? OR "
+            "lower(email) LIKE ? OR lower(phone) LIKE ?"
+            ")"
+        )
+        params.extend([like, like, like, like, like, like, like, like])
+    if org_filter:
+        where.append("organization = ?")
+        params.append(org_filter)
+    if category_filter:
+        where.append("category = ?")
+        params.append(category_filter)
+    if state_filter:
+        where.append("state = ?")
+        params.append(state_filter)
+    if city_filter:
+        where.append("city = ?")
+        params.append(city_filter)
+    if license_filter:
+        where.append("license_label = ?")
+        params.append(license_filter)
+
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM vendors{where_sql}",
+        tuple(params),
+    ).fetchone()[0]
+
     rows = conn.execute(
-        """
-        SELECT id, vendor, organization, category, state, city, website, email
+        f"""
+        SELECT id, vendor, organization, category, state, city, website, email, phone, license_label, is_greek_licensed, is_collegiate
         FROM vendors
+        {where_sql}
         ORDER BY vendor ASC
-        """
+        LIMIT ? OFFSET ?
+        """,
+        tuple(params + [limit, offset]),
     ).fetchall()
     out = []
     for row in rows:
@@ -1332,7 +1436,71 @@ def api_vendors():
         item["updated_at"] = clean_text(crm_info.get("updated_at"))
         item["served"] = vnorm in served_vendor_set or crm_status == "closed"
         out.append(item)
-    return jsonify({"ok": True, "rows": out})
+    return jsonify({"ok": True, "results": out, "total": int(total), "page": page})
+
+@bp.route("/api/institutions")
+@login_required()
+def api_institutions():
+    if not os.path.exists(Config.DB_PATH):
+        return jsonify({"ok": False, "error": "Run import_csv.py first", "rows": []}), 400
+    conn = get_connection()
+    ensure_institutions_table(conn)
+    page_raw = clean_text(request.args.get("page"))
+    limit_raw = clean_text(request.args.get("limit"))
+    page = int(page_raw) if page_raw.isdigit() and int(page_raw) > 0 else 1
+    limit = int(limit_raw) if limit_raw.isdigit() and int(limit_raw) > 0 else 50
+    limit = min(limit, 50)
+    offset = (page - 1) * limit
+    q = clean_text(request.args.get("q")).lower()
+    type_filter = clean_text(request.args.get("location_type"))
+    parent_filter = clean_text(request.args.get("parent_name"))
+    state_filter = clean_text(request.args.get("state"))
+    city_filter = clean_text(request.args.get("city"))
+
+    where = []
+    params = []
+    if q:
+        like = f"%{q}%"
+        where.append(
+            "("
+            "lower(location_name) LIKE ? OR lower(parent_name) LIKE ? OR "
+            "lower(city) LIKE ? OR lower(state) LIKE ? OR lower(general_phone) LIKE ?"
+            ")"
+        )
+        params.extend([like, like, like, like, like])
+    if type_filter:
+        where.append("location_type = ?")
+        params.append(type_filter)
+    if parent_filter:
+        where.append("parent_name = ?")
+        params.append(parent_filter)
+    if state_filter:
+        where.append("state = ?")
+        params.append(state_filter)
+    if city_filter:
+        where.append("city = ?")
+        params.append(city_filter)
+
+    where_sql = " WHERE " + " AND ".join(where) if where else ""
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM institutions{where_sql}",
+        tuple(params),
+    ).fetchone()[0]
+
+    rows = conn.execute(
+        f"""
+        SELECT id, location_name, parent_name, location_type, address, street, city, state, zip,
+               general_phone, admin_name, admin_phone, admin_email, fax, update_date,
+               dapip_id, ope_id, ipeds_unit_ids, parent_dapip_id
+        FROM institutions
+        {where_sql}
+        ORDER BY location_name ASC
+        LIMIT ? OFFSET ?
+        """,
+        tuple(params + [limit, offset]),
+    ).fetchall()
+    out = [{k: row[k] for k in row.keys()} for row in rows]
+    return jsonify({"ok": True, "results": out, "total": int(total), "page": page})
 
 @bp.route("/api/leads/add", methods=["POST"])
 @login_required()

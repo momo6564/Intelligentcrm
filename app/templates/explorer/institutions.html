@@ -1,0 +1,242 @@
+{% extends "layouts/app_shell.html" %}
+{% block title %}Education Institutions{% endblock %}
+{% block page_title %}Education Institutions{% endblock %}
+{% block page_subtitle %}Filter and explore accredited schools and locations{% endblock %}
+{% block content %}
+<div x-data="institutionsApp()" x-init="load()" class="space-y-4">
+  <div class="grid xl:grid-cols-[320px_1fr] gap-4">
+    <div class="panel p-4 space-y-3 xl:sticky xl:top-4 h-fit">
+      <h3 class="font-semibold">Filters</h3>
+      <input x-model="search" @input="debounceApply()" placeholder="Search name, parent, city, state, phone" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <select x-model="filters.locationType" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All location types</option>
+        <template x-for="v in options.locationTypes"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.parent" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All parent institutions</option>
+        <template x-for="v in options.parents"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.state" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All states</option>
+        <template x-for="v in options.states"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.city" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All cities</option>
+        <template x-for="v in options.cities"><option :value="v" x-text="v"></option></template>
+      </select>
+      <button @click="reset()" class="w-full btn-ghost">Reset Filters</button>
+    </div>
+
+    <div class="panel overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center gap-2 justify-between text-sm">
+        <span class="font-medium" x-text="loading ? 'Loading institutions...' : `${rows.length} of ${total} institutions`"></span>
+        <div class="flex flex-wrap items-center gap-2">
+          <select x-model="sortBy" @change="apply()" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">
+            <option value="location_name">Sort: Name</option>
+            <option value="location_type">Sort: Type</option>
+            <option value="parent_name">Sort: Parent</option>
+            <option value="state">Sort: State</option>
+            <option value="city">Sort: City</option>
+          </select>
+          <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="toggleSortDir()" x-text="sortDir==='asc' ? 'Asc' : 'Desc'"></button>
+          <div class="relative">
+            <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="showColumnMenu = !showColumnMenu">Columns</button>
+            <div x-show="showColumnMenu" @click.outside="showColumnMenu=false" class="absolute right-0 mt-2 z-20 w-56 rounded-xl border border-slate-200 bg-white shadow p-2 space-y-1 text-xs">
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.name"> Name</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.type"> Type</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.parent"> Parent</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.city"> City</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.state"> State</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.phone"> Phone</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.email"> Admin Email</label>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="overflow-y-auto overflow-x-hidden max-h-[68vh]">
+        <table class="w-full text-sm table-fixed">
+          <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
+            <tr>
+              <th x-show="visibleColumns.name" class="text-left px-3 py-2">Name</th>
+              <th x-show="visibleColumns.type" class="text-left px-3 py-2">Type</th>
+              <th x-show="visibleColumns.parent" class="text-left px-3 py-2">Parent</th>
+              <th x-show="visibleColumns.city" class="text-left px-3 py-2">City</th>
+              <th x-show="visibleColumns.state" class="text-left px-3 py-2">State</th>
+              <th x-show="visibleColumns.phone" class="text-left px-3 py-2">Phone</th>
+              <th x-show="visibleColumns.email" class="text-left px-3 py-2">Admin Email</th>
+              <th class="text-left px-3 py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr x-show="loading">
+              <td :colspan="visibleColumnCount()" class="px-3 py-4">
+                <div class="animate-pulse space-y-2">
+                  <div class="h-3 w-2/3 rounded bg-slate-200"></div>
+                  <div class="h-3 w-1/2 rounded bg-slate-200"></div>
+                  <div class="h-3 w-3/4 rounded bg-slate-200"></div>
+                </div>
+              </td>
+            </tr>
+            <template x-for="r in rows" :key="r.id">
+              <tr class="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer"
+                  @click="openDrawer(r.id)">
+                <td x-show="visibleColumns.name" class="px-3 py-2 truncate" x-text="r.location_name || '-'"></td>
+                <td x-show="visibleColumns.type" class="px-3 py-2 truncate" x-text="r.location_type || '-'"></td>
+                <td x-show="visibleColumns.parent" class="px-3 py-2 truncate" x-text="r.parent_name || '-'"></td>
+                <td x-show="visibleColumns.city" class="px-3 py-2 truncate" x-text="r.city || '-'"></td>
+                <td x-show="visibleColumns.state" class="px-3 py-2 truncate" x-text="r.state || '-'"></td>
+                <td x-show="visibleColumns.phone" class="px-3 py-2 truncate" x-text="r.general_phone || '-'"></td>
+                <td x-show="visibleColumns.email" class="px-3 py-2 truncate" x-text="r.admin_email || '-'"></td>
+                <td class="px-3 py-2">
+                  <div class="flex items-center gap-1" @click.stop>
+                    <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/institutions/detail?institution_id=${encodeURIComponent(r.id)}`">Details</a>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="!loading && rows.length===0">
+              <td :colspan="visibleColumnCount()" class="px-3 py-8 text-center text-slate-500">No institutions match your filters.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
+        <span class="text-slate-500" x-text="`Showing ${rows.length} records`"></span>
+        <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function institutionsApp(){
+  return {
+    rows:[], search:"", total:0, pageSize:50, page:1,
+    loading:false, searchTimer:null, drawerController:null,
+    sortBy:"location_name", sortDir:"asc", showColumnMenu:false,
+    visibleColumns:{name:true, type:true, parent:true, city:true, state:true, phone:true, email:true},
+    filters:{locationType:"", parent:"", state:"", city:""},
+    options:{locationTypes:[],parents:[],states:[],cities:[]},
+    uniq(values){ return [...new Set(values.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b))); },
+    visibleColumnCount(){
+      let count = 1; // actions
+      if(this.visibleColumns.name) count += 1;
+      if(this.visibleColumns.type) count += 1;
+      if(this.visibleColumns.parent) count += 1;
+      if(this.visibleColumns.city) count += 1;
+      if(this.visibleColumns.state) count += 1;
+      if(this.visibleColumns.phone) count += 1;
+      if(this.visibleColumns.email) count += 1;
+      return count;
+    },
+    toggleSortDir(){
+      this.sortDir = this.sortDir === "asc" ? "desc" : "asc";
+      this.apply();
+    },
+    debounceApply(){
+      if(this.searchTimer) clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => this.apply(), 180);
+    },
+    sortRows(items){
+      const key = this.sortBy || "location_name";
+      const dir = this.sortDir === "desc" ? -1 : 1;
+      return [...items].sort((a,b)=>{
+        const av = String(a[key] || "").toLowerCase();
+        const bv = String(b[key] || "").toLowerCase();
+        if(av < bv) return -1 * dir;
+        if(av > bv) return 1 * dir;
+        return 0;
+      });
+    },
+    async load(resetPage=true){
+      if(resetPage){
+        this.page = 1;
+        this.rows = [];
+      }
+      this.loading = true;
+      try{
+        const params = new URLSearchParams({
+          page: String(this.page),
+          limit: String(this.pageSize),
+          q: this.search || "",
+          location_type: this.filters.locationType || "",
+          parent_name: this.filters.parent || "",
+          state: this.filters.state || "",
+          city: this.filters.city || ""
+        });
+        const out = await fetch(`/api/institutions?${params.toString()}`).then(r=>r.json());
+        if(!out.ok){ this.rows=[]; this.total=0; return; }
+        const incoming = out.results || [];
+        this.total = Number(out.total || 0);
+        if(this.page === 1){
+          this.rows = incoming;
+        }else{
+          this.rows = [...this.rows, ...incoming];
+        }
+        this.options.locationTypes = this.uniq(this.rows.map(r=>r.location_type));
+        this.options.parents = this.uniq(this.rows.map(r=>r.parent_name));
+        this.options.states = this.uniq(this.rows.map(r=>r.state));
+        this.options.cities = this.uniq(this.rows.map(r=>r.city));
+        this.rows = this.sortRows(this.rows);
+      }catch(_err){
+        this.rows = [];
+        this.total = 0;
+        (window.appToast || alert)("Could not load institutions", "error");
+      }finally{
+        this.loading = false;
+        window.__institutionsApp = this;
+      }
+    },
+    apply(){
+      if(!this.visibleColumns.name && !this.visibleColumns.type && !this.visibleColumns.parent && !this.visibleColumns.city && !this.visibleColumns.state && !this.visibleColumns.phone && !this.visibleColumns.email){
+        this.visibleColumns.name = true;
+      }
+      this.load(true);
+    },
+    loadMore(){
+      if(this.rows.length >= this.total) return;
+      this.page += 1;
+      this.load(false);
+    },
+    reset(){
+      this.search="";
+      this.filters={locationType:"", parent:"", state:"", city:""};
+      this.load(true);
+    },
+    async openDrawer(institutionId){
+      const drawer = document.getElementById("institutionDrawer");
+      if(!drawer) return;
+      if(this.drawerController){
+        try{ this.drawerController.abort(); }catch(_){}
+      }
+      const controller = new AbortController();
+      this.drawerController = controller;
+      drawer.innerHTML = `
+        <div class="animate-pulse space-y-2">
+          <div class="h-4 w-40 rounded bg-slate-200"></div>
+          <div class="h-20 rounded-xl bg-slate-100"></div>
+          <div class="h-20 rounded-xl bg-slate-100"></div>
+        </div>
+      `;
+      try{
+        const out = await fetch(`/ui/institution-drawer?institution_id=${encodeURIComponent(institutionId)}`, {signal: controller.signal});
+        drawer.innerHTML = await out.text();
+      }catch(err){
+        if(err && err.name === "AbortError") return;
+        drawer.innerHTML = `<div class="text-sm text-rose-700">Could not load institution details.</div>`;
+      }finally{
+        if(this.drawerController === controller){
+          this.drawerController = null;
+        }
+      }
+    },
+  }
+}
+</script>
+{% endblock %}
+
+{% block context_panel %}
+<aside id="institutionDrawer" class="panel p-4 h-fit">
+  <div class="text-sm text-slate-500">Select an institution to open contextual details.</div>
+</aside>
+{% endblock %}

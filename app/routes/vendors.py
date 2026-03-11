@@ -35,7 +35,7 @@ def vendor_detail_page():
     if vendor_id_raw.isdigit():
         row = conn.execute(
             """
-            SELECT id, vendor, organization, category, state, city, website, email
+            SELECT id, vendor, organization, category, state, city, website, email, phone, license_label, is_greek_licensed, is_collegiate
             FROM vendors
             WHERE id=?
             """,
@@ -44,7 +44,7 @@ def vendor_detail_page():
     if row is None and vendor_name:
         row = conn.execute(
             """
-            SELECT id, vendor, organization, category, state, city, website, email
+            SELECT id, vendor, organization, category, state, city, website, email, phone, license_label, is_greek_licensed, is_collegiate
             FROM vendors
             WHERE lower(vendor)=lower(?)
             ORDER BY id ASC
@@ -64,6 +64,10 @@ def vendor_detail_page():
             "city": "",
             "website": "",
             "email": "",
+            "phone": "",
+            "license_label": "",
+            "is_greek_licensed": 0,
+            "is_collegiate": 0,
         }
 
     lookup_name = clean_text(vendor.get("vendor")) or vendor_name
@@ -183,7 +187,7 @@ def vendor_drawer_partial():
     ensure_vendor_table(conn)
     row = conn.execute(
         """
-        SELECT id, vendor, organization, category, state, city, website, email
+        SELECT id, vendor, organization, category, state, city, website, email, phone, license_label, is_greek_licensed, is_collegiate
         FROM vendors
         WHERE id=?
         """,

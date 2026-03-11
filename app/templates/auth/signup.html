@@ -53,7 +53,20 @@
       color:#133b6f;
       background:#fff;
     }
+    .field select{
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 12px;
+      font:inherit;
+      color:#133b6f;
+      background:#fff;
+    }
     .field input:focus{
+      outline:none;
+      border-color:#75aeff;
+      box-shadow:0 0 0 3px rgba(46,125,255,.20);
+    }
+    .field select:focus{
       outline:none;
       border-color:#75aeff;
       box-shadow:0 0 0 3px rgba(46,125,255,.20);
@@ -93,6 +106,17 @@
       </label>
       <label class="field">Password
         <input name="password" type="password" required>
+      </label>
+      <label class="field wide">Security Question
+        <select name="security_question" required>
+          <option value="">Select a security question</option>
+          {% for q in questions %}
+            <option value="{{ q }}">{{ q }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field wide">Security Answer
+        <input name="security_answer" required>
       </label>
       <label class="field wide">Manufacturer Name
         <input name="manufacturer_name" required>

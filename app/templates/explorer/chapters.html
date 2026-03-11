@@ -8,7 +8,7 @@
     <div class="panel p-4 space-y-3 xl:sticky xl:top-4 h-fit">
       <h3 class="font-semibold">Filters</h3>
       <input x-model="search" @input="debounceApply()" placeholder="Search chapter, school, city, org" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-      <select x-model="filters.orgCode" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <select x-model="filters.organization" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All organizations</option>
         <template x-for="v in options.orgs"><option :value="v" x-text="v"></option></template>
       </select>
@@ -24,14 +24,6 @@
         <option value="">All states</option>
         <template x-for="v in options.states"><option :value="v" x-text="v"></option></template>
       </select>
-      <select x-model="filters.scope" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All scopes</option>
-        <template x-for="v in options.scopes"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.entityType" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All types</option>
-        <template x-for="v in options.types"><option :value="v" x-text="v"></option></template>
-      </select>
       <select x-model="filters.status" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All statuses</option>
         <template x-for="v in options.statuses"><option :value="v" x-text="v"></option></template>
@@ -45,24 +37,18 @@
         <option value="closed">Served</option>
         <option value="dormant">Dormant</option>
       </select>
-      <select x-model="filters.vendorCoverage" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All coverage</option>
-        <option value="with">With Vendors</option>
-        <option value="without">No Vendors</option>
-      </select>
       <button @click="reset()" class="w-full btn-ghost">Reset Filters</button>
     </div>
 
     <div class="panel overflow-hidden">
       <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center gap-2 justify-between text-sm">
-        <span class="font-medium" x-text="loading ? 'Loading chapters...' : `${rows.length} of ${filteredTotal} chapters`"></span>
+        <span class="font-medium" x-text="loading ? 'Loading chapters...' : `${rows.length} of ${total} chapters`"></span>
         <div class="flex flex-wrap items-center gap-2">
           <select x-model="sortBy" @change="apply()" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">
             <option value="school">Sort: School</option>
-            <option value="chapterName">Sort: Chapter</option>
-            <option value="orgName">Sort: Organization</option>
+            <option value="chapter_name">Sort: Chapter</option>
+            <option value="organization">Sort: Organization</option>
             <option value="crm_stage">Sort: CRM Stage</option>
-            <option value="vendorCount">Sort: Vendor Count</option>
           </select>
           <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="toggleSortDir()" x-text="sortDir==='asc' ? 'Asc' : 'Desc'"></button>
           <div class="relative">
@@ -102,9 +88,9 @@
                   @click="openDrawer(r.id)">
                 <td x-show="visibleColumns.school" class="px-3 py-2 truncate" x-text="r.school || '-'"></td>
                 <td x-show="visibleColumns.chapter" class="px-3 py-2">
-                  <a class="text-blue-700 hover:underline" :href="`/chapters/${encodeURIComponent(r.id)}`" @click.stop x-text="r.chapterName || '-'"></a>
+                  <a class="text-blue-700 hover:underline" :href="`/chapters/${encodeURIComponent(r.id)}`" @click.stop x-text="r.chapter_name || '-'"></a>
                 </td>
-                <td x-show="visibleColumns.organization" class="px-3 py-2 truncate" x-text="r.orgName || r.orgCode || '-'"></td>
+                <td x-show="visibleColumns.organization" class="px-3 py-2 truncate" x-text="r.organization || '-'"></td>
                 <td x-show="visibleColumns.crm" class="px-3 py-2">
                   <span x-show="r.crm_stage==='closed'" class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-xs">Served</span>
                   <span x-show="r.crm_stage==='prospect'" class="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-xs">Prospect</span>
@@ -134,7 +120,7 @@
       </div>
       <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
         <span class="text-slate-500" x-text="`Showing ${rows.length} records`"></span>
-        <button x-show="rows.length < filteredTotal" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 20 more</button>
+        <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
       </div>
     </div>
   </div>
@@ -143,12 +129,12 @@
 <script>
 function chaptersApp(){
   return {
-    all:[], rows:[], search:"", filteredTotal:0, pageSize:20, visibleCount:20,
+    rows:[], search:"", total:0, pageSize:50, page:1,
     loading:false, searchTimer:null, drawerController:null,
     sortBy:"school", sortDir:"asc", showColumnMenu:false,
     visibleColumns:{school:true, chapter:true, organization:true, crm:true},
-    filters:{orgCode:"",school:"",city:"",state:"",scope:"",entityType:"",status:"",crmStage:"",vendorCoverage:""},
-    options:{orgs:[],schools:[],cities:[],states:[],scopes:[],types:[],statuses:[]},
+    filters:{organization:"",school:"",city:"",state:"",status:"",crmStage:""},
+    options:{orgs:[],schools:[],cities:[],states:[],statuses:[]},
     uniq(values){ return [...new Set(values.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b))); },
     visibleColumnCount(){
       let count = 1; // actions
@@ -164,45 +150,57 @@ function chaptersApp(){
     },
     debounceApply(){
       if(this.searchTimer) clearTimeout(this.searchTimer);
-      this.visibleCount = this.pageSize;
       this.searchTimer = setTimeout(() => this.apply(), 180);
     },
     sortRows(items){
       const key = this.sortBy || "school";
       const dir = this.sortDir === "desc" ? -1 : 1;
       const sorted = [...items].sort((a,b)=>{
-        let av = a[key];
-        let bv = b[key];
-        if(key === "vendorCount"){
-          av = Number(av || 0);
-          bv = Number(bv || 0);
-          return (av - bv) * dir;
-        }
-        av = String(av || "").toLowerCase();
-        bv = String(bv || "").toLowerCase();
+        const av = String(a[key] || "").toLowerCase();
+        const bv = String(b[key] || "").toLowerCase();
         if(av < bv) return -1 * dir;
         if(av > bv) return 1 * dir;
         return 0;
       });
       return sorted;
     },
-    async load(){
+    async load(resetPage=true){
+      if(resetPage){
+        this.page = 1;
+        this.rows = [];
+      }
       this.loading = true;
       try{
-        const out = await fetch("/api/chapters").then(r=>r.json());
-        if(!out.ok){ this.all=[]; this.rows=[]; return; }
-        this.all = out.rows || [];
-        this.options.orgs = this.uniq(this.all.map(r=>r.orgCode));
-        this.options.schools = this.uniq(this.all.map(r=>r.school));
-        this.options.cities = this.uniq(this.all.map(r=>r.city));
-        this.options.states = this.uniq(this.all.map(r=>r.state));
-        this.options.scopes = this.uniq(this.all.map(r=>r.scope));
-        this.options.types = this.uniq(this.all.map(r=>r.entityType));
-        this.options.statuses = this.uniq(this.all.map(r=>r.status));
-        this.apply();
+        const params = new URLSearchParams({
+          page: String(this.page),
+          limit: String(this.pageSize),
+          q: this.search || "",
+          organization: this.filters.organization || "",
+          school: this.filters.school || "",
+          city: this.filters.city || "",
+          state: this.filters.state || ""
+        });
+        const out = await fetch(`/api/chapters?${params.toString()}`).then(r=>r.json());
+        if(!out.ok){ this.rows=[]; this.total=0; return; }
+        const incoming = out.results || [];
+        this.total = Number(out.total || 0);
+        if(this.page === 1){
+          this.rows = incoming;
+        }else{
+          this.rows = [...this.rows, ...incoming];
+        }
+        this.options.orgs = this.uniq(this.rows.map(r=>r.organization));
+        this.options.schools = this.uniq(this.rows.map(r=>r.school));
+        this.options.cities = this.uniq(this.rows.map(r=>r.city));
+        this.options.states = this.uniq(this.rows.map(r=>r.state));
+        this.options.statuses = this.uniq(this.rows.map(r=>r.status));
+        this.rows = this.sortRows(this.rows);
+        if(this.filters.crmStage){
+          this.rows = this.rows.filter(r => (r.crm_stage || "") === this.filters.crmStage);
+        }
       }catch(_err){
-        this.all = [];
         this.rows = [];
+        this.total = 0;
         (window.appToast || alert)("Could not load chapters", "error");
       }finally{
         this.loading = false;
@@ -213,41 +211,24 @@ function chaptersApp(){
       if(!this.visibleColumns.school && !this.visibleColumns.chapter && !this.visibleColumns.organization && !this.visibleColumns.crm){
         this.visibleColumns.chapter = true;
       }
-      const q = (this.search||"").toLowerCase().trim();
-      const filtered = this.all.filter(r=>{
-        if(this.filters.orgCode && r.orgCode !== this.filters.orgCode) return false;
-        if(this.filters.school && r.school !== this.filters.school) return false;
-        if(this.filters.city && r.city !== this.filters.city) return false;
-        if(this.filters.state && r.state !== this.filters.state) return false;
-        if(this.filters.scope && r.scope !== this.filters.scope) return false;
-        if(this.filters.entityType && r.entityType !== this.filters.entityType) return false;
-        if(this.filters.status && r.status !== this.filters.status) return false;
-        if(this.filters.crmStage && (r.crm_stage || "") !== this.filters.crmStage) return false;
-        if(this.filters.vendorCoverage === "with" && !(Number(r.vendorCount) > 0)) return false;
-        if(this.filters.vendorCoverage === "without" && !(Number(r.vendorCount) === 0)) return false;
-        if(q && !Object.values(r).join(" ").toLowerCase().includes(q)) return false;
-        return true;
-      });
-      const sorted = this.sortRows(filtered);
-      this.filteredTotal = sorted.length;
-      this.rows = sorted.slice(0, this.visibleCount);
+      this.load(true);
     },
     loadMore(){
-      this.visibleCount += this.pageSize;
-      this.apply();
+      if(this.rows.length >= this.total) return;
+      this.page += 1;
+      this.load(false);
     },
     reset(){
       this.search="";
-      this.visibleCount = this.pageSize;
-      this.filters={orgCode:"",school:"",city:"",state:"",scope:"",entityType:"",status:"",crmStage:"",vendorCoverage:""};
-      this.apply();
+      this.filters={organization:"",school:"",city:"",state:"",status:"",crmStage:""};
+      this.load(true);
     },
     async quickAdd(action, r){
       await addChapterFromDrawer(
         action,
         r.id,
-        r.chapterName || "",
-        r.orgName || "",
+        r.chapter_name || "",
+        r.organization || "",
         r.school || "",
         r.city || "",
         r.state || ""

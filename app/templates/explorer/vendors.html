@@ -7,7 +7,7 @@
   <div class="grid xl:grid-cols-[320px_1fr] gap-4">
     <div class="panel p-4 space-y-3 xl:sticky xl:top-4 h-fit">
       <h3 class="font-semibold">Filters</h3>
-      <input x-model="search" @input="debounceApply()" placeholder="Search vendor, organization, state, category" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <input x-model="search" @input="debounceApply()" placeholder="Search vendor, organization, state, category, type" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
       <select x-model="filters.organization" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All organizations</option>
         <template x-for="v in options.organizations"><option :value="v" x-text="v"></option></template>
@@ -15,6 +15,10 @@
       <select x-model="filters.category" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All products/categories</option>
         <template x-for="v in options.categories"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.license" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All vendor types</option>
+        <template x-for="v in options.licenses"><option :value="v" x-text="v"></option></template>
       </select>
       <select x-model="filters.state" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All states</option>
@@ -38,7 +42,7 @@
 
     <div class="panel overflow-hidden">
       <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center gap-2 justify-between text-sm">
-        <span class="font-medium" x-text="loading ? 'Loading vendors...' : `${rows.length} of ${filteredTotal} vendors`"></span>
+        <span class="font-medium" x-text="loading ? 'Loading vendors...' : `${rows.length} of ${total} vendors`"></span>
         <div class="flex flex-wrap items-center gap-2">
           <select x-model="sortBy" @change="apply()" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">
             <option value="vendor">Sort: Vendor</option>
@@ -52,8 +56,10 @@
             <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="showColumnMenu = !showColumnMenu">Columns</button>
             <div x-show="showColumnMenu" @click.outside="showColumnMenu=false" class="absolute right-0 mt-2 z-20 w-52 rounded-xl border border-slate-200 bg-white shadow p-2 space-y-1 text-xs">
               <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.vendor"> Vendor</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.license"> Type</label>
               <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.organization"> Organization</label>
               <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.category"> Category</label>
+              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.phone"> Phone</label>
               <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.crm"> CRM</label>
             </div>
           </div>
@@ -64,8 +70,10 @@
           <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
             <tr>
               <th x-show="visibleColumns.vendor" class="text-left px-3 py-2">Vendor</th>
+              <th x-show="visibleColumns.license" class="text-left px-3 py-2">Type</th>
               <th x-show="visibleColumns.organization" class="text-left px-3 py-2">Organization</th>
               <th x-show="visibleColumns.category" class="text-left px-3 py-2">Category</th>
+              <th x-show="visibleColumns.phone" class="text-left px-3 py-2">Phone</th>
               <th x-show="visibleColumns.crm" class="text-left px-3 py-2">CRM</th>
               <th class="text-left px-3 py-2">Actions</th>
             </tr>
@@ -84,8 +92,10 @@
               <tr class="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer"
                   @click="openDrawer(r.id)">
                 <td x-show="visibleColumns.vendor" class="px-3 py-2 truncate" x-text="r.vendor || '-'"></td>
+                <td x-show="visibleColumns.license" class="px-3 py-2 truncate" x-text="r.license_label || '-'"></td>
                 <td x-show="visibleColumns.organization" class="px-3 py-2 truncate" x-text="r.organization || '-'"></td>
                 <td x-show="visibleColumns.category" class="px-3 py-2 truncate" x-text="r.category || '-'"></td>
+                <td x-show="visibleColumns.phone" class="px-3 py-2 truncate" x-text="r.phone || '-'"></td>
                 <td x-show="visibleColumns.crm" class="px-3 py-2">
                   <span x-show="r.crm_stage==='closed'" class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-xs">Served</span>
                   <span x-show="r.crm_stage==='prospect'" class="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-xs">Prospect</span>
@@ -103,6 +113,7 @@
                   <div class="flex items-center gap-1" @click.stop>
                     <button class="btn-ghost px-2 py-1 text-[11px]" @click="quickAdd('prospect', r)">Prospect</button>
                     <button class="btn-ghost px-2 py-1 text-[11px]" @click="quickAdd('served', r)">Served</button>
+                    <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/vendors/detail?vendor_id=${encodeURIComponent(r.id)}`">Details</a>
                   </div>
                 </td>
               </tr>
@@ -115,7 +126,7 @@
       </div>
       <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
         <span class="text-slate-500" x-text="`Showing ${rows.length} records`"></span>
-        <button x-show="rows.length < filteredTotal" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 20 more</button>
+        <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
       </div>
     </div>
   </div>
@@ -124,18 +135,20 @@
 <script>
 function vendorsApp(){
   return {
-    all:[], rows:[], search:"", filteredTotal:0, pageSize:20, visibleCount:20,
+    rows:[], search:"", total:0, pageSize:50, page:1,
     loading:false, searchTimer:null, drawerController:null,
     sortBy:"vendor", sortDir:"asc", showColumnMenu:false,
-    visibleColumns:{vendor:true, organization:true, category:true, crm:true},
-    filters:{organization:"",category:"",state:"",city:"",crmStage:""},
-    options:{organizations:[],categories:[],states:[],cities:[]},
+    visibleColumns:{vendor:true, license:true, organization:true, category:true, phone:true, crm:true},
+    filters:{organization:"",category:"",state:"",city:"",license:"",crmStage:""},
+    options:{organizations:[],categories:[],states:[],cities:[],licenses:[]},
     uniq(values){ return [...new Set(values.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b))); },
     visibleColumnCount(){
       let count = 1; // actions
       if(this.visibleColumns.vendor) count += 1;
+      if(this.visibleColumns.license) count += 1;
       if(this.visibleColumns.organization) count += 1;
       if(this.visibleColumns.category) count += 1;
+      if(this.visibleColumns.phone) count += 1;
       if(this.visibleColumns.crm) count += 1;
       return count;
     },
@@ -145,7 +158,6 @@ function vendorsApp(){
     },
     debounceApply(){
       if(this.searchTimer) clearTimeout(this.searchTimer);
-      this.visibleCount = this.pageSize;
       this.searchTimer = setTimeout(() => this.apply(), 180);
     },
     sortRows(items){
@@ -159,20 +171,44 @@ function vendorsApp(){
         return 0;
       });
     },
-    async load(){
+    async load(resetPage=true){
+      if(resetPage){
+        this.page = 1;
+        this.rows = [];
+      }
       this.loading = true;
       try{
-        const out = await fetch("/api/vendors").then(r=>r.json());
-        if(!out.ok){ this.all=[]; this.rows=[]; return; }
-        this.all = out.rows || [];
-        this.options.organizations = this.uniq(this.all.map(r=>r.organization));
-        this.options.categories = this.uniq(this.all.map(r=>r.category));
-        this.options.states = this.uniq(this.all.map(r=>r.state));
-        this.options.cities = this.uniq(this.all.map(r=>r.city));
-        this.apply();
+        const params = new URLSearchParams({
+          page: String(this.page),
+          limit: String(this.pageSize),
+          q: this.search || "",
+          organization: this.filters.organization || "",
+          category: this.filters.category || "",
+          state: this.filters.state || "",
+          city: this.filters.city || "",
+          license: this.filters.license || ""
+        });
+        const out = await fetch(`/api/vendors?${params.toString()}`).then(r=>r.json());
+        if(!out.ok){ this.rows=[]; this.total=0; return; }
+        const incoming = out.results || [];
+        this.total = Number(out.total || 0);
+        if(this.page === 1){
+          this.rows = incoming;
+        }else{
+          this.rows = [...this.rows, ...incoming];
+        }
+        this.options.organizations = this.uniq(this.rows.map(r=>r.organization));
+        this.options.categories = this.uniq(this.rows.map(r=>r.category));
+        this.options.states = this.uniq(this.rows.map(r=>r.state));
+        this.options.cities = this.uniq(this.rows.map(r=>r.city));
+        this.options.licenses = this.uniq(this.rows.map(r=>r.license_label));
+        this.rows = this.sortRows(this.rows);
+        if(this.filters.crmStage){
+          this.rows = this.rows.filter(r => (r.crm_stage || "") === this.filters.crmStage);
+        }
       }catch(_err){
-        this.all = [];
         this.rows = [];
+        this.total = 0;
         (window.appToast || alert)("Could not load vendors", "error");
       }finally{
         this.loading = false;
@@ -180,35 +216,23 @@ function vendorsApp(){
       }
     },
     apply(){
-      if(!this.visibleColumns.vendor && !this.visibleColumns.organization && !this.visibleColumns.category && !this.visibleColumns.crm){
+      if(!this.visibleColumns.vendor && !this.visibleColumns.license && !this.visibleColumns.organization && !this.visibleColumns.category && !this.visibleColumns.phone && !this.visibleColumns.crm){
         this.visibleColumns.vendor = true;
       }
-      const q = (this.search||"").toLowerCase().trim();
-      const filtered = this.all.filter(r=>{
-        if(this.filters.organization && r.organization !== this.filters.organization) return false;
-        if(this.filters.category && r.category !== this.filters.category) return false;
-        if(this.filters.state && r.state !== this.filters.state) return false;
-        if(this.filters.city && r.city !== this.filters.city) return false;
-        if(this.filters.crmStage && (r.crm_stage || "") !== this.filters.crmStage) return false;
-        if(q && !Object.values(r).join(" ").toLowerCase().includes(q)) return false;
-        return true;
-      });
-      const sorted = this.sortRows(filtered);
-      this.filteredTotal = sorted.length;
-      this.rows = sorted.slice(0, this.visibleCount);
+      this.load(true);
     },
     loadMore(){
-      this.visibleCount += this.pageSize;
-      this.apply();
+      if(this.rows.length >= this.total) return;
+      this.page += 1;
+      this.load(false);
     },
     reset(){
       this.search="";
-      this.visibleCount = this.pageSize;
-      this.filters={organization:"",category:"",state:"",city:"",crmStage:""};
-      this.apply();
+      this.filters={organization:"",category:"",state:"",city:"",license:"",crmStage:""};
+      this.load(true);
     },
     async quickAdd(action, r){
-      await addVendorFromDrawer(action, r.id, r.vendor || "", r.organization || "");
+      await addVendorFromDrawer(action, r.id, r.vendor || "", r.organization || r.license_label || "");
     },
     async openDrawer(vendorId){
       const drawer = document.getElementById("vendorDrawer");
