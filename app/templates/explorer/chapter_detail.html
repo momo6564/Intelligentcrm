@@ -33,23 +33,6 @@
       </div>
     </div>
 
-    <div class="panel p-4">
-      <h3 class="font-semibold mb-2">Vendors Serving This Chapter</h3>
-      <div class="space-y-2">
-        {% if chapter.vendors %}
-          {% for v in chapter.vendors %}
-            <div class="rounded-xl border border-slate-200 p-3 text-sm">
-              <div class="font-medium">{{ v.vendor or "Unknown Vendor" }}</div>
-              <div class="text-slate-500">{{ v.category or "General" }} | {{ v.city or "" }} {{ v.state or "" }}</div>
-              <div class="text-xs text-blue-700">{{ v.matchType }}</div>
-            </div>
-          {% endfor %}
-        {% else %}
-          <div class="text-sm text-slate-500">No matched vendors found.</div>
-        {% endif %}
-      </div>
-    </div>
-
     <div class="panel p-4"
          x-data="chapterCrm()"
          x-init="init()">
@@ -134,7 +117,16 @@
     <h3 class="font-semibold mb-2">Hot Leads: Same Campus</h3>
     <div class="space-y-2 max-h-[16rem] overflow-auto text-sm">
       {% for r in campus %}
-        <a href="/chapters/{{ r.encodedId }}" class="block rounded-xl border border-slate-200 p-2 hover:bg-slate-50">{{ r.orgCode }} - {{ r.chapterName }}</a>
+        <a href="/chapters/{{ r.encodedId }}" class="block rounded-xl border border-slate-200 p-2 hover:bg-slate-50">
+          <div class="flex items-center justify-between gap-2">
+            <span>{{ r.orgCode }} - {{ r.chapterName }}</span>
+            {% if r.crm_status == "served" %}
+              <span class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-[10px] font-semibold">Served</span>
+            {% elif r.crm_status == "prospect" %}
+              <span class="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[10px] font-semibold">Prospect</span>
+            {% endif %}
+          </div>
+        </a>
       {% else %}
         <div class="text-slate-500">No other chapters on this campus.</div>
       {% endfor %}
@@ -144,10 +136,35 @@
     <h3 class="font-semibold mb-2">Nearby Chapters (State)</h3>
     <div class="space-y-2 max-h-[16rem] overflow-auto text-sm">
       {% for r in same_state %}
-        <a href="/chapters/{{ r.encodedId }}" class="block rounded-xl border border-slate-200 p-2 hover:bg-slate-50">{{ r.orgCode }} - {{ r.chapterName }}</a>
+        <a href="/chapters/{{ r.encodedId }}" class="block rounded-xl border border-slate-200 p-2 hover:bg-slate-50">
+          <div class="flex items-center justify-between gap-2">
+            <span>{{ r.orgCode }} - {{ r.chapterName }}</span>
+            {% if r.crm_status == "served" %}
+              <span class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-[10px] font-semibold">Served</span>
+            {% elif r.crm_status == "prospect" %}
+              <span class="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-[10px] font-semibold">Prospect</span>
+            {% endif %}
+          </div>
+        </a>
       {% else %}
         <div class="text-slate-500">No nearby chapters found.</div>
       {% endfor %}
+    </div>
+  </div>
+  <div class="panel p-4">
+    <h3 class="font-semibold mb-2">Vendors Serving or Targeting This Chapter</h3>
+    <div class="space-y-2 max-h-[18rem] overflow-auto text-sm">
+      {% if chapter.vendors %}
+        {% for v in chapter.vendors %}
+          <div class="rounded-xl border border-slate-200 p-3">
+            <div class="font-medium">{{ v.vendor or "Unknown Vendor" }}</div>
+            <div class="text-slate-500">{{ v.category or "General" }} | {{ v.city or "" }} {{ v.state or "" }}</div>
+            <div class="text-xs text-blue-700">{{ v.matchType }}</div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="text-sm text-slate-500">No matched vendors found.</div>
+      {% endif %}
     </div>
   </div>
 </aside>

@@ -38,6 +38,16 @@ def action_to_status(value: str) -> str:
         return action
     return "prospect"
 
+def default_stage_titles() -> dict:
+    return {
+        "prospect": "Prospect",
+        "contacted": "Contacted",
+        "follow_up": "Follow Up",
+        "negotiating": "Negotiating",
+        "closed": "Served",
+        "dormant": "Dormant",
+    }
+
 def _iso_date(value: str) -> str:
     return clean_date(value)
 
@@ -970,6 +980,92 @@ def api_m_crm_add_vendor():
 def api_alias_add_vendor():
     return api_m_crm_add_vendor()
 
+@bp.route("/api/m/crm/add-institution", methods=["POST"])
+@login_required()
+def api_m_crm_add_institution():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    payload = request.get_json(silent=True) or {}
+    institution_id = clean_text(payload.get("institution_id"))
+    institution_name = clean_text(payload.get("institution_name"))
+    city = clean_text(payload.get("city"))
+    state = clean_text(payload.get("state"))
+    action = clean_text(payload.get("action"))
+    status = action_to_status(action)
+    if not institution_id or not institution_name:
+        return jsonify({"ok": False, "error": "institution_id and institution_name are required"}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    manufacturer_id = _manufacturer_id_from_user(conn, user)
+    connection = f"institution:{institution_id}"
+    exists = conn.execute(
+        """
+        SELECT id FROM crm_contacts
+        WHERE type='other' AND connection=? AND workspace_id=?
+        """,
+        (connection, workspace_id),
+    ).fetchone()
+    if exists:
+        conn.execute(
+            """
+            UPDATE crm_contacts
+            SET status=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+            """,
+            (status, int(exists["id"])),
+        )
+        contact_id = int(exists["id"])
+        duplicate = True
+    else:
+        crm_cols = {row[1] for row in conn.execute("PRAGMA table_info(crm_contacts)").fetchall()}
+        insert_cols = ["type", "name", "connection", "status", "workspace_id"]
+        insert_vals = ["other", institution_name, connection, status, workspace_id]
+        if "priority" in crm_cols:
+            insert_cols.append("priority")
+            insert_vals.append("normal")
+        if "updated_at" in crm_cols:
+            insert_cols.append("updated_at")
+            insert_vals.append(datetime.now().isoformat(timespec="seconds"))
+        if "created_by_user_id" in crm_cols:
+            insert_cols.append("created_by_user_id")
+            insert_vals.append(int(user.get("id") or 0))
+        if "manufacturer_id" in crm_cols:
+            insert_cols.insert(0, "manufacturer_id")
+            insert_vals.insert(0, manufacturer_id)
+        placeholders = ",".join("?" for _ in insert_cols)
+        cur = conn.execute(
+            f"INSERT INTO crm_contacts({','.join(insert_cols)}) VALUES({placeholders})",
+            tuple(insert_vals),
+        )
+        contact_id = int(cur.lastrowid)
+        duplicate = False
+
+    conn.execute(
+        """
+        INSERT INTO crm_activities(crm_contact_id, action, detail, created_by_user_id, workspace_id)
+        VALUES(?, ?, ?, ?, ?)
+        """,
+        (
+            int(contact_id),
+            "marked_served" if status == "closed" else "added_to_pipeline",
+            f"{institution_name} ({city}{', ' + state if state else ''})",
+            int(user.get("id") or 0),
+            workspace_id,
+        ),
+    )
+    log_activity(
+        conn,
+        int(user.get("id") or 0),
+        "added_institution_served" if status == "closed" else "added_institution_prospect",
+        "crm_contact",
+        str(contact_id),
+        institution_name,
+        workspace_id=workspace_id,
+    )
+    conn.commit()
+    return jsonify({"ok": True, "duplicate": duplicate, "status": status})
+
 @bp.route("/api/m/crm")
 @login_required()
 def api_m_crm():
@@ -1022,6 +1118,50 @@ def api_m_crm():
         item["can_delete"] = _can_delete_contact(user, item.get("created_by_user_id"))
         out.append(item)
     return jsonify({"ok": True, "rows": out})
+
+@bp.route("/api/m/crm/stages", methods=["GET", "POST"])
+@login_required()
+def api_m_crm_stages():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    defaults = default_stage_titles()
+    if request.method == "GET":
+        rows = conn.execute(
+            "SELECT stage_key, title FROM crm_stage_titles WHERE workspace_id=?",
+            (workspace_id,),
+        ).fetchall()
+        titles = {row["stage_key"]: clean_text(row["title"]) for row in rows}
+        for key, label in defaults.items():
+            if not clean_text(titles.get(key)):
+                titles[key] = label
+        return jsonify({"ok": True, "titles": titles})
+
+    payload = request.get_json(silent=True) or {}
+    titles = payload.get("titles") or {}
+    if not isinstance(titles, dict):
+        return jsonify({"ok": False, "error": "titles must be an object"}), 400
+    for key in defaults.keys():
+        title = clean_text(titles.get(key))
+        if not title:
+            conn.execute(
+                "DELETE FROM crm_stage_titles WHERE workspace_id=? AND stage_key=?",
+                (workspace_id, key),
+            )
+            continue
+        conn.execute(
+            """
+            INSERT INTO crm_stage_titles(workspace_id, stage_key, title)
+            VALUES(?, ?, ?)
+            ON CONFLICT(workspace_id, stage_key) DO UPDATE SET
+                title=excluded.title,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            (workspace_id, key, title),
+        )
+    conn.commit()
+    return jsonify({"ok": True})
 
 @bp.route("/api/m/crm/update", methods=["POST"])
 @login_required()
@@ -1774,6 +1914,16 @@ def api_m_crm_board():
         (workspace_id,),
     ).fetchone()
     reachouts_total = int(reachouts_total["c"] or 0) if reachouts_total else 0
+    stage_titles = default_stage_titles()
+    title_rows = conn.execute(
+        "SELECT stage_key, title FROM crm_stage_titles WHERE workspace_id=?",
+        (workspace_id,),
+    ).fetchall()
+    for row in title_rows:
+        key = clean_text(row["stage_key"])
+        title = clean_text(row["title"])
+        if key and title:
+            stage_titles[key] = title
 
     return jsonify(
         {
@@ -1781,6 +1931,7 @@ def api_m_crm_board():
             "stages": stages,
             "counts": {k: len(v) for k, v in stages.items()},
             "tasks": tasks,
+            "stage_titles": stage_titles,
             "kpis": {
                 "total_contacts": len(contacts),
                 "open_tasks": len(tasks),

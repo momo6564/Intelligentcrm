@@ -1,7 +1,8 @@
 from flask import Blueprint, request, render_template
 from ..auth import login_required, get_session_user
-from ..database import get_connection, ensure_institutions_table, ensure_chapters_table
+from ..database import get_connection, ensure_institutions_table, ensure_chapters_table, ensure_crm_tables
 from ..utils.text_utils import clean_text
+from ..utils.workspace import workspace_id_for_user
 
 bp = Blueprint("institutions", __name__)
 
@@ -22,6 +23,7 @@ def institutions_page():
 def institution_detail_page():
     inst_id_raw = clean_text(request.args.get("institution_id"))
     conn = get_connection()
+    ensure_crm_tables(conn)
     ensure_institutions_table(conn)
     ensure_chapters_table(conn)
 
@@ -67,11 +69,30 @@ def institution_detail_page():
                 """,
                 (clean_text(institution.get("location_name")),),
             ).fetchall()
+    my_status = ""
+    if institution:
+        user = get_session_user()
+        workspace_id = workspace_id_for_user(user)
+        connection = f"institution:{institution.get('id')}"
+        crm_row = conn.execute(
+            """
+            SELECT id, status
+            FROM crm_contacts
+            WHERE workspace_id=? AND type='other' AND connection=?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (workspace_id, connection),
+        ).fetchone()
+        if crm_row:
+            status = clean_text(crm_row["status"]).lower()
+            my_status = "served" if status == "closed" else "prospect"
     error = "" if institution else "Institution not found."
     return render_app(
         "explorer/institution_detail.html",
         institution=institution,
         chapters=[{k: row[k] for k in row.keys()} for row in chapters],
+        my_status=my_status,
         error=error,
     )
 

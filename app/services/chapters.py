@@ -173,10 +173,17 @@ def chapter_detail_bundle(chapter_id: str) -> dict:
         for r in all_rows
         if clean_text(r.get("school")) and clean_text(r.get("school")) == clean_text(chapter.get("school")) and clean_text(r.get("id")) != clean_text(chapter.get("id"))
     ][:15]
+    chapter_state = norm_state(chapter.get("state")) or clean_text(chapter.get("state"))
+    chapter_school = clean_text(chapter.get("school"))
+    chapter_org = norm_org(chapter.get("orgName", ""))
     same_state = [
         dict(r)
         for r in all_rows
-        if clean_text(r.get("state")) and clean_text(r.get("state")) == clean_text(chapter.get("state")) and clean_text(r.get("id")) != clean_text(chapter.get("id"))
+        if clean_text(r.get("state"))
+        and (norm_state(r.get("state")) or clean_text(r.get("state"))) == chapter_state
+        and norm_org(r.get("orgName", "")) == chapter_org
+        and clean_text(r.get("school")) != chapter_school
+        and clean_text(r.get("id")) != clean_text(chapter.get("id"))
     ][:15]
     chapter["encodedId"] = quote(clean_text(chapter.get("id")), safe="")
     for row in campus:

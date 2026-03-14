@@ -42,6 +42,7 @@
       <button type="button" @click="$store.crm.view='calendar'" class="btn-ghost px-3 py-1.5 text-sm"
               :class="$store.crm.view==='calendar' ? '!bg-[#1d68ee] !text-white !border-[#1d68ee]' : ''">Calendar</button>
       <button type="button" @click="$store.crm.openNewContact()" class="ml-auto btn-primary px-3 py-1.5 text-sm">New Contact</button>
+      <button type="button" @click="$store.crm.openStageEditor()" class="btn-ghost px-3 py-1.5 text-sm">Edit Pipeline</button>
       <button type="button" @click="$store.crm.load(true)" class="btn-ghost px-3 py-1.5 text-sm">Refresh</button>
     </div>
     <div class="grid md:grid-cols-3 gap-2">
@@ -176,6 +177,30 @@
         </div>
       </template>
       <div x-show="$store.crm.calendarEvents.length===0" class="text-sm text-slate-500">No scheduled tasks.</div>
+    </div>
+  </div>
+
+  <div x-show="$store.crm.showStageEditor" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4">
+    <div class="panel w-full max-w-xl p-4">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <div class="text-xs uppercase text-slate-500">CRM</div>
+          <h3 class="text-lg font-semibold">Edit Pipeline Titles</h3>
+        </div>
+        <button type="button" @click="$store.crm.closeStageEditor()" class="btn-ghost px-2 py-1 text-xs">Close</button>
+      </div>
+      <div class="mt-3 grid gap-3 text-sm">
+        <template x-for="s in $store.crm.stageKeys" :key="`title-${s}`">
+          <div>
+            <label class="text-xs text-slate-500 uppercase" x-text="s.replace('_',' ')"></label>
+            <input x-model="$store.crm.stageDraft[s]" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          </div>
+        </template>
+      </div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button type="button" @click="$store.crm.closeStageEditor()" class="btn-ghost px-3 py-2 text-sm">Cancel</button>
+        <button type="button" @click="$store.crm.saveStageTitles()" class="btn-primary px-3 py-2 text-sm">Save Titles</button>
+      </div>
     </div>
   </div>
 
@@ -420,6 +445,7 @@ document.addEventListener("alpine:init", () => {
     view: "board",
     pendingContactId: null,
     stageKeys: ["prospect","contacted","follow_up","negotiating","closed","dormant"],
+    stageTitles: {prospect:"Prospect", contacted:"Contacted", follow_up:"Follow Up", negotiating:"Negotiating", closed:"Served", dormant:"Dormant"},
     all: [],
     rows: [],
     board: {stages:{}},
@@ -438,10 +464,11 @@ document.addEventListener("alpine:init", () => {
     showNewContact: false,
     newContact: {name:"", type:"vendor", connection:"", status:"prospect", notes:"", follow_up_date:"", expected_close_date:"", priority:"normal", value_estimate:"", contact_source:""},
     outreach: {source:"", note:""},
+    showStageEditor: false,
+    stageDraft: {},
     stageLabel(status){
       const s = (status || "").toLowerCase();
-      const map = {prospect:"Prospect", contacted:"Contacted", follow_up:"Follow Up", negotiating:"Negotiating", closed:"Served", dormant:"Dormant"};
-      return map[s] || "Prospect";
+      return this.stageTitles[s] || "Prospect";
     },
     statusBadgeClass(status){
       const s = (status || "").toLowerCase();
@@ -475,6 +502,27 @@ document.addEventListener("alpine:init", () => {
       if(this.searchTimer) clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(()=>this.apply(), 180);
     },
+    openStageEditor(){
+      this.stageDraft = {...this.stageTitles};
+      this.showStageEditor = true;
+    },
+    closeStageEditor(){
+      this.showStageEditor = false;
+    },
+    async saveStageTitles(){
+      const payload = {titles: this.stageDraft};
+      const out = await fetch("/api/m/crm/stages", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not save pipeline titles", "error");
+        return;
+      }
+      this.stageTitles = {...this.stageDraft};
+      this.showStageEditor = false;
+    },
     async load(force=false){
       if(this.loading) return;
       if(this.loaded && !force) return;
@@ -487,6 +535,9 @@ document.addEventListener("alpine:init", () => {
         ]);
         this.all = crmOut.ok ? (crmOut.rows || []) : [];
         this.board = boardOut.ok ? boardOut : {stages:{}};
+        if(boardOut.ok && boardOut.stage_titles){
+          this.stageTitles = {...this.stageTitles, ...boardOut.stage_titles};
+        }
         this.kpis = boardOut.ok ? (boardOut.kpis || this.kpis) : this.kpis;
         this.calendarEvents = calOut.ok ? (calOut.events || []) : [];
         this.apply();

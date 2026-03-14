@@ -66,6 +66,51 @@ def chapter_detail_page(chapter_id: str):
         "expected_close_date": clean_text(crm_row["expected_close_date"]) if crm_row else "",
     }
 
+    related_rows = list(bundle.get("campus") or []) + list(bundle.get("same_state") or [])
+    related_ids = [clean_text(r.get("id")) for r in related_rows if clean_text(r.get("id"))]
+    crm_map = {}
+    served_set = set()
+    if related_ids:
+        placeholders = ",".join("?" for _ in related_ids)
+        crm_rows = conn.execute(
+            f"""
+            SELECT chapter_id, status
+            FROM crm_contacts
+            WHERE workspace_id=? AND type='chapter' AND chapter_id IN ({placeholders})
+            """,
+            (workspace_id, *related_ids),
+        ).fetchall()
+        for row in crm_rows:
+            crm_map[clean_text(row["chapter_id"])] = clean_text(row["status"]).lower()
+        served_rows = conn.execute(
+            f"""
+            SELECT DISTINCT chapter_id
+            FROM vendor_orders
+            WHERE workspace_id=? AND chapter_id IN ({placeholders})
+            """,
+            (workspace_id, *related_ids),
+        ).fetchall()
+        served_set = {clean_text(r["chapter_id"]) for r in served_rows if clean_text(r["chapter_id"])}
+
+    for row in bundle.get("campus", []):
+        rid = clean_text(row.get("id"))
+        status = crm_map.get(rid, "")
+        if rid in served_set or status == "closed":
+            row["crm_status"] = "served"
+        elif status:
+            row["crm_status"] = "prospect"
+        else:
+            row["crm_status"] = ""
+    for row in bundle.get("same_state", []):
+        rid = clean_text(row.get("id"))
+        status = crm_map.get(rid, "")
+        if rid in served_set or status == "closed":
+            row["crm_status"] = "served"
+        elif status:
+            row["crm_status"] = "prospect"
+        else:
+            row["crm_status"] = ""
+
     chapter_name = clean_text(chapter.get("chapterName"))
     org_name = clean_text(chapter.get("orgName"))
     school = clean_text(chapter.get("school"))

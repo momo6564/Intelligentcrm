@@ -19,7 +19,20 @@
           <h2 class="text-2xl font-semibold">{{ institution.location_name or "-" }}</h2>
           <div class="text-sm text-slate-500">{{ institution.city or "-" }}, {{ institution.state or "-" }}</div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
+          {% if my_status == "served" %}
+            <span class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-1 text-xs font-semibold">Added as Served</span>
+          {% elif my_status == "prospect" %}
+            <span class="rounded-full bg-amber-100 text-amber-700 px-2 py-1 text-xs font-semibold">Added as Prospect</span>
+          {% else %}
+            <span class="rounded-full bg-slate-100 text-slate-600 px-2 py-1 text-xs font-semibold">Not in My CRM</span>
+          {% endif %}
+          <button type="button" class="btn-ghost text-[11px] px-3 py-2" onclick="markInstitution('prospect')">Add as Prospect</button>
+          <button type="button" class="btn-ghost text-[11px] px-3 py-2" onclick="markInstitution('served')">Add as Served</button>
+          {% set vendor_query = "Gemini, list approved vendors and suppliers for " ~ (institution.location_name or "") ~ " procurement preferred vendors site:.edu" %}
+          {% set events_query = "Gemini, find upcoming events calendar for " ~ (institution.location_name or "") ~ " site:.edu" %}
+          <a class="btn-ghost text-[11px] px-3 py-2" href="https://www.google.com/search?q={{ vendor_query | urlencode }}" target="_blank" rel="noopener">Find Vendors</a>
+          <a class="btn-ghost text-[11px] px-3 py-2" href="https://www.google.com/search?q={{ events_query | urlencode }}" target="_blank" rel="noopener">Upcoming Events</a>
           {% if website %}
             <a href="{{ website_href }}" target="_blank" rel="noopener" class="btn-primary text-[11px] px-3 py-2">Visit Website</a>
           {% endif %}
@@ -147,4 +160,29 @@
     <dt class="text-slate-500">Latitude</dt><dd>{{ institution.latitude or "-" }}</dd>
   </dl>
 </aside>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function markInstitution(action){
+  const payload = {
+    institution_id: {{ institution.id|default(None)|tojson }},
+    institution_name: {{ institution.location_name|default('')|tojson }},
+    city: {{ institution.city|default('')|tojson }},
+    state: {{ institution.state|default('')|tojson }},
+    action: action
+  };
+  const resp = await fetch("/api/m/crm/add-institution", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  const out = await resp.json();
+  if(!out.ok){
+    (window.appToast || alert)(out.error || "Failed to update CRM", "error");
+    return;
+  }
+  location.reload();
+}
+</script>
 {% endblock %}
