@@ -7,25 +7,104 @@
   {% if error %}
     <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-800">{{ error }}</div>
   {% else %}
-    <div class="panel p-4">
-      <div class="flex items-center justify-between">
+    {% set website = institution.website or "" %}
+    {% set website_href = website %}
+    {% if website and "://" not in website %}
+      {% set website_href = "https://" + website %}
+    {% endif %}
+    <div class="panel p-4 space-y-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 class="text-xl font-semibold">{{ institution.location_name or "-" }}</h2>
-          <div class="text-xs text-slate-500">{{ institution.location_type or "-" }}</div>
+          <div class="text-xs uppercase tracking-wide text-slate-500">Institution Profile</div>
+          <h2 class="text-2xl font-semibold">{{ institution.location_name or "-" }}</h2>
+          <div class="text-sm text-slate-500">{{ institution.city or "-" }}, {{ institution.state or "-" }}</div>
         </div>
-        <a href="/institutions" class="text-sm text-blue-700 hover:underline">Back to Institutions</a>
+        <div class="flex items-center gap-2">
+          {% if website %}
+            <a href="{{ website_href }}" target="_blank" rel="noopener" class="btn-primary text-[11px] px-3 py-2">Visit Website</a>
+          {% endif %}
+          <a href="/institutions" class="btn-ghost text-[11px] px-3 py-2">Back to Institutions</a>
+        </div>
       </div>
-      <div class="mt-3 grid md:grid-cols-2 gap-3 text-sm">
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Parent</div><div>{{ institution.parent_name or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Address</div><div>{{ institution.address or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">City / State</div><div>{{ institution.city or "-" }}, {{ institution.state or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Zip</div><div>{{ institution.zip or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">General Phone</div><div>{{ institution.general_phone or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Fax</div><div>{{ institution.fax or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Admin Contact</div><div>{{ institution.admin_name or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Admin Phone</div><div>{{ institution.admin_phone or "-" }}</div></div>
-        <div class="rounded-xl border border-slate-200 p-3 md:col-span-2"><div class="text-slate-500 text-xs uppercase">Admin Email</div><div>{{ institution.admin_email or "-" }}</div></div>
+
+      <div class="flex flex-wrap gap-2 text-xs">
+        {% if institution.control %}<span class="rounded-full bg-blue-50 text-blue-700 px-3 py-1 font-semibold">{{ institution.control }}</span>{% endif %}
+        {% if institution.institution_level %}<span class="rounded-full bg-amber-50 text-amber-700 px-3 py-1 font-semibold">{{ institution.institution_level }}</span>{% endif %}
+        {% if institution.degree_granting_status %}<span class="rounded-full bg-violet-50 text-violet-700 px-3 py-1 font-semibold">{{ institution.degree_granting_status }}</span>{% endif %}
+        {% if institution.locale %}<span class="rounded-full bg-slate-100 text-slate-600 px-3 py-1 font-semibold">{{ institution.locale }}</span>{% endif %}
       </div>
+
+      <div class="grid lg:grid-cols-3 gap-3 text-sm">
+        <div class="rounded-xl border border-slate-200 p-3 space-y-1">
+          <div class="text-slate-500 text-xs uppercase">Enrollment</div>
+          <div class="text-base font-semibold">
+            {% if institution.students_total %}{{ "{:,}".format(institution.students_total) }}{% else %}-{% endif %}
+          </div>
+          <div class="text-xs text-slate-500">Total students</div>
+          {% if institution.dorm_capacity %}
+            <div class="text-xs text-slate-500 mt-2">Dorm capacity: {{ "{:,}".format(institution.dorm_capacity) }}</div>
+          {% endif %}
+          {% if institution.acceptance_rate %}
+            <div class="text-xs text-slate-500">
+              Acceptance rate:
+              {% if institution.acceptance_rate > 1 %}
+                {{ institution.acceptance_rate }}%
+              {% else %}
+                {{ (institution.acceptance_rate * 100) | round(1) }}%
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+        <div class="rounded-xl border border-slate-200 p-3 space-y-1">
+          <div class="text-slate-500 text-xs uppercase">Location</div>
+          <div>{{ institution.address or "-" }}</div>
+          <div>{{ institution.city or "-" }}, {{ institution.state or "-" }} {{ institution.zip or "" }}</div>
+          <div class="text-xs text-slate-500">Phone: {{ institution.general_phone or "-" }}</div>
+          <div class="text-xs text-slate-500">Fax: {{ institution.fax or "-" }}</div>
+        </div>
+        <div class="rounded-xl border border-slate-200 p-3 space-y-1">
+          <div class="text-slate-500 text-xs uppercase">Admin Contact</div>
+          <div>{{ institution.admin_name or "-" }}</div>
+          <div class="text-xs text-slate-500">Phone: {{ institution.admin_phone or "-" }}</div>
+          <div class="text-xs text-slate-500">Email: {{ institution.admin_email or "-" }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="font-semibold">Chapters at this Institution</h3>
+        <div class="text-xs text-slate-500">{{ chapters|length }} shown</div>
+      </div>
+      {% if chapters and chapters|length > 0 %}
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="table-head text-xs uppercase text-slate-500">
+              <tr>
+                <th class="text-left px-3 py-2">Organization</th>
+                <th class="text-left px-3 py-2">Chapter</th>
+                <th class="text-left px-3 py-2">Status</th>
+                <th class="text-left px-3 py-2">City / State</th>
+                <th class="text-left px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for chapter in chapters %}
+                <tr class="border-b border-slate-100">
+                  <td class="px-3 py-2">{{ chapter.organization or "-" }}</td>
+                  <td class="px-3 py-2 font-medium">{{ chapter.chapter_name or "-" }}</td>
+                  <td class="px-3 py-2">{{ chapter.status or "-" }}</td>
+                  <td class="px-3 py-2">{{ chapter.city or "-" }}, {{ chapter.state or "-" }}</td>
+                  <td class="px-3 py-2">
+                    <a href="/chapters/{{ chapter.chapter_uid | urlencode }}" class="text-blue-700 hover:underline text-xs">Open</a>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="text-sm text-slate-500">No chapters matched this institution yet.</div>
+      {% endif %}
     </div>
   {% endif %}
 {% endblock %}
@@ -37,8 +116,35 @@
     <dt class="text-slate-500">DAPIP ID</dt><dd>{{ institution.dapip_id or "-" }}</dd>
     <dt class="text-slate-500">OPE ID</dt><dd>{{ institution.ope_id or "-" }}</dd>
     <dt class="text-slate-500">IPEDS</dt><dd>{{ institution.ipeds_unit_ids or "-" }}</dd>
+    <dt class="text-slate-500">UNITID</dt><dd>{{ institution.unitid or "-" }}</dd>
     <dt class="text-slate-500">Parent DAPIP</dt><dd>{{ institution.parent_dapip_id or "-" }}</dd>
+    <dt class="text-slate-500">Institution ID</dt><dd>{{ institution.institution_id or "-" }}</dd>
     <dt class="text-slate-500">Updated</dt><dd>{{ institution.update_date or "-" }}</dd>
+  </dl>
+  <h3 class="font-semibold">Accreditation Details</h3>
+  <dl class="grid grid-cols-[160px_1fr] gap-x-3 gap-y-1 text-sm">
+    <dt class="text-slate-500">Alias</dt><dd>{{ institution.alias or "-" }}</dd>
+    <dt class="text-slate-500">Website</dt><dd>{{ institution.website or "-" }}</dd>
+    <dt class="text-slate-500">Telephone</dt><dd>{{ institution.telephone or "-" }}</dd>
+    <dt class="text-slate-500">EIN</dt><dd>{{ institution.ein or "-" }}</dd>
+    <dt class="text-slate-500">Institution Level</dt><dd>{{ institution.institution_level or "-" }}</dd>
+    <dt class="text-slate-500">Control</dt><dd>{{ institution.control or "-" }}</dd>
+    <dt class="text-slate-500">Highest Offering</dt><dd>{{ institution.highest_offering or "-" }}</dd>
+    <dt class="text-slate-500">UG Offering</dt><dd>{{ institution.ug_offering or "-" }}</dd>
+    <dt class="text-slate-500">Grad Offering</dt><dd>{{ institution.grad_offering or "-" }}</dd>
+    <dt class="text-slate-500">Degree Status</dt><dd>{{ institution.degree_granting_status or "-" }}</dd>
+    <dt class="text-slate-500">Locale</dt><dd>{{ institution.locale or "-" }}</dd>
+    <dt class="text-slate-500">Student Total</dt><dd>{{ institution.students_total or "-" }}</dd>
+    <dt class="text-slate-500">Dorm Capacity</dt><dd>{{ institution.dorm_capacity or "-" }}</dd>
+    <dt class="text-slate-500">Acceptance Rate</dt><dd>{{ institution.acceptance_rate or "-" }}</dd>
+    <dt class="text-slate-500">Public Status</dt><dd>{{ institution.public_status or "-" }}</dd>
+    <dt class="text-slate-500">Post Secondary</dt><dd>{{ institution.post_secondary_status or "-" }}</dd>
+    <dt class="text-slate-500">County</dt><dd>{{ institution.county or "-" }}</dd>
+    <dt class="text-slate-500">FIPS State</dt><dd>{{ institution.fips_state_code or "-" }}</dd>
+    <dt class="text-slate-500">FIPS County</dt><dd>{{ institution.fips_county_code or "-" }}</dd>
+    <dt class="text-slate-500">Congress Dist</dt><dd>{{ institution.congressional_district or "-" }}</dd>
+    <dt class="text-slate-500">Longitude</dt><dd>{{ institution.longitude or "-" }}</dd>
+    <dt class="text-slate-500">Latitude</dt><dd>{{ institution.latitude or "-" }}</dd>
   </dl>
 </aside>
 {% endblock %}

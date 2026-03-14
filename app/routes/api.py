@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import uuid
 from datetime import datetime, date
 from flask import Blueprint, request, jsonify, redirect, url_for, Response
 from urllib.parse import quote
@@ -62,12 +63,495 @@ def _manufacturer_id_from_user(conn, user: dict) -> int:
     row = conn.execute("SELECT manufacturer_id FROM users WHERE id=?", (user_id,)).fetchone()
     return int(row["manufacturer_id"] or 0) if row else 0
 
+def _table_has_column(conn, table_name: str, col_name: str) -> bool:
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    return col_name in cols
+
+def _workspace_has_any_data(conn, workspace_id: str) -> bool:
+    ws = clean_text(workspace_id)
+    if not ws:
+        return False
+    checks = ["crm_contacts", "vendor_orders", "leads", "chapter_contacts", "activities", "messages"]
+    for table in checks:
+        if not _table_has_column(conn, table, "workspace_id"):
+            continue
+        row = conn.execute(f"SELECT 1 FROM {table} WHERE workspace_id=? LIMIT 1", (ws,)).fetchone()
+        if row is not None:
+            return True
+    return False
+
+def _workspace_has_real_crm_data(conn, workspace_id: str) -> bool:
+    ws = clean_text(workspace_id)
+    if not ws:
+        return False
+    checks = ["crm_contacts", "vendor_orders", "crm_notes", "crm_tasks", "chapter_contacts", "leads"]
+    for table in checks:
+        if not _table_has_column(conn, table, "workspace_id"):
+            continue
+        row = conn.execute(f"SELECT 1 FROM {table} WHERE workspace_id=? LIMIT 1", (ws,)).fetchone()
+        if row is not None:
+            return True
+    return False
+
+def _workspace_crm_counts(conn, workspace_id: str) -> dict:
+    ws = clean_text(workspace_id)
+    if not ws:
+        return {}
+    tables = ["crm_contacts", "vendor_orders", "crm_notes", "crm_tasks", "chapter_contacts", "leads"]
+    counts = {}
+    for table in tables:
+        if not _table_has_column(conn, table, "workspace_id"):
+            counts[table] = 0
+            continue
+        row = conn.execute(f"SELECT COUNT(*) AS c FROM {table} WHERE workspace_id=?", (ws,)).fetchone()
+        counts[table] = int(row["c"] or 0) if row else 0
+    return counts
+
+def _wipe_workspace_crm_data(conn, workspace_id: str) -> None:
+    ws = clean_text(workspace_id)
+    if not ws:
+        return
+    tables = [
+        "crm_notes",
+        "crm_tasks",
+        "crm_activities",
+        "crm_contact_tags",
+        "crm_contacts",
+        "vendor_orders",
+        "chapter_contacts",
+        "leads",
+        "messages",
+    ]
+    for table in tables:
+        if not _table_has_column(conn, table, "workspace_id"):
+            continue
+        conn.execute(f"DELETE FROM {table} WHERE workspace_id=?", (ws,))
+
+def _user_is_manager(user: dict) -> bool:
+    role = clean_text(user.get("team_role")).lower()
+    return role in {"manager", "owner", "admin"}
+
+def _can_delete_contact(user: dict, created_by_user_id) -> bool:
+    user_id = int(user.get("id") or 0)
+    team_id = int(user.get("team_id") or 0)
+    if team_id <= 0:
+        return True
+    if _user_is_manager(user):
+        return True
+    if created_by_user_id is None:
+        return False
+    try:
+        return int(created_by_user_id) == user_id
+    except Exception:
+        return False
+
+def _log_outreach_activity(conn, contact_id: int, user_id: int, workspace_id: str, source: str, note: str = "") -> None:
+    src = clean_text(source) or "Manual"
+    detail = clean_text(note) or "Contacted lead"
+    cols = ["crm_contact_id", "action", "detail", "created_by_user_id", "workspace_id"]
+    vals = [int(contact_id), "outreach", detail, int(user_id or 0), workspace_id]
+    if _table_has_column(conn, "crm_activities", "source"):
+        cols.append("source")
+        vals.append(src)
+    placeholders = ",".join("?" for _ in cols)
+    conn.execute(
+        f"INSERT INTO crm_activities({','.join(cols)}) VALUES({placeholders})",
+        tuple(vals),
+    )
+
+def _active_invite_row(conn, invite_code: str):
+    return conn.execute(
+        """
+        SELECT id, team_id, max_uses, uses, expires_at, is_active
+        FROM team_invites
+        WHERE invite_code=?
+        """,
+        (invite_code,),
+    ).fetchone()
+
 @bp.route("/api/me")
 def api_me():
     user = get_session_user()
     if not user:
         return jsonify({"ok": False, "error": "not logged in"}), 401
     return jsonify({"ok": True, "user": user})
+
+@bp.route("/api/team/status")
+@login_required()
+def api_team_status():
+    user = get_session_user()
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    team_id = int(user.get("team_id") or 0)
+    team = None
+    if team_id > 0:
+        row = conn.execute(
+            "SELECT id, name, invite_code, workspace_id, owner_user_id, created_at FROM teams WHERE id=?",
+            (team_id,),
+        ).fetchone()
+        if row:
+            team = {k: row[k] for k in row.keys()}
+    return jsonify({"ok": True, "team": team, "role": clean_text(user.get("team_role"))})
+
+@bp.route("/api/team/create", methods=["POST"])
+@login_required()
+def api_team_create():
+    user = get_session_user()
+    if int(user.get("team_id") or 0) > 0:
+        return jsonify({"ok": False, "error": "You are already in a team."}), 400
+    payload = request.get_json(silent=True) or {}
+    name = clean_text(payload.get("name")) or clean_text(user.get("account_name")) or clean_text(user.get("username"))
+    if not name:
+        return jsonify({"ok": False, "error": "Team name is required."}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    workspace_id = workspace_id_for_user(user)
+    existing = conn.execute("SELECT id FROM teams WHERE workspace_id=?", (workspace_id,)).fetchone()
+    if existing:
+        return jsonify({"ok": False, "error": "A team already exists for this workspace."}), 400
+
+    invite_code = ""
+    for _ in range(6):
+        candidate = uuid.uuid4().hex[:8].upper()
+        exists = conn.execute("SELECT 1 FROM teams WHERE invite_code=?", (candidate,)).fetchone()
+        if not exists:
+            invite_code = candidate
+            break
+    if not invite_code:
+        return jsonify({"ok": False, "error": "Could not generate invite code."}), 500
+
+    cur = conn.execute(
+        "INSERT INTO teams(name, invite_code, workspace_id, owner_user_id) VALUES(?, ?, ?, ?)",
+        (name, invite_code, workspace_id, int(user.get("id") or 0)),
+    )
+    team_id = int(cur.lastrowid)
+    default_invite_code = ""
+    for _ in range(6):
+        candidate = uuid.uuid4().hex[:8].upper()
+        exists = conn.execute("SELECT 1 FROM team_invites WHERE invite_code=?", (candidate,)).fetchone()
+        if not exists:
+            default_invite_code = candidate
+            break
+    if default_invite_code:
+        conn.execute(
+            """
+            INSERT INTO team_invites(team_id, invite_code, max_uses, uses, expires_at, is_active, created_by_user_id)
+            VALUES(?, ?, 5, 0, datetime('now', '+7 days'), 1, ?)
+            """,
+            (team_id, default_invite_code, int(user.get("id") or 0)),
+        )
+    conn.execute(
+        "UPDATE users SET team_id=?, team_role=? WHERE id=?",
+        (team_id, "manager", int(user.get("id") or 0)),
+    )
+    conn.commit()
+    return jsonify({"ok": True, "team_id": team_id, "invite_code": default_invite_code or invite_code, "name": name})
+
+@bp.route("/api/team/join", methods=["POST"])
+@login_required()
+def api_team_join():
+    user = get_session_user()
+    if int(user.get("team_id") or 0) > 0:
+        return jsonify({"ok": False, "error": "You are already in a team."}), 400
+    payload = request.get_json(silent=True) or {}
+    invite_code = clean_text(payload.get("invite_code")).upper()
+    force_join = bool(payload.get("force", False))
+    if not invite_code:
+        return jsonify({"ok": False, "error": "Invite code is required."}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    invite = _active_invite_row(conn, invite_code)
+    if invite is None:
+        return jsonify({"ok": False, "error": "Invalid invite code."}), 404
+    if int(invite["is_active"] or 0) != 1:
+        return jsonify({"ok": False, "error": "Invite is no longer active."}), 400
+    if invite["expires_at"]:
+        row = conn.execute("SELECT datetime('now') <= datetime(?) AS valid", (invite["expires_at"],)).fetchone()
+        if row and int(row["valid"] or 0) == 0:
+            return jsonify({"ok": False, "error": "Invite has expired."}), 400
+    if invite["max_uses"] is not None and int(invite["uses"] or 0) >= int(invite["max_uses"] or 0):
+        return jsonify({"ok": False, "error": "Invite usage limit reached."}), 400
+
+    team = conn.execute(
+        "SELECT id, name, workspace_id FROM teams WHERE id=?",
+        (int(invite["team_id"]),),
+    ).fetchone()
+    if team is None:
+        return jsonify({"ok": False, "error": "Invite team not found."}), 404
+
+    current_workspace = workspace_id_for_user(user)
+    team_workspace = clean_text(team["workspace_id"])
+    if current_workspace and current_workspace != team_workspace:
+        if _workspace_has_real_crm_data(conn, current_workspace):
+            if not force_join:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "This account already has CRM data. Ask a manager to create a fresh account to join the team.",
+                        "can_force": True,
+                        "counts": _workspace_crm_counts(conn, current_workspace),
+                    }
+                ), 400
+            _wipe_workspace_crm_data(conn, current_workspace)
+
+    conn.execute(
+        "UPDATE users SET team_id=?, team_role=?, workspace_id=? WHERE id=?",
+        (int(team["id"]), "member", team_workspace, int(user.get("id") or 0)),
+    )
+    conn.execute(
+        "UPDATE team_invites SET uses=uses+1 WHERE id=?",
+        (int(invite["id"]),),
+    )
+    conn.commit()
+    return jsonify({"ok": True, "team_id": int(team["id"]), "team_name": clean_text(team["name"])})
+
+@bp.route("/api/team/invites", methods=["GET", "POST"])
+@login_required()
+def api_team_invites():
+    user = get_session_user()
+    team_id = int(user.get("team_id") or 0)
+    if team_id <= 0:
+        return jsonify({"ok": False, "error": "Not in a team."}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+
+    if request.method == "GET":
+        rows = conn.execute(
+            """
+            SELECT id, invite_code, max_uses, uses, expires_at, is_active, created_at
+            FROM team_invites
+            WHERE team_id=?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (team_id,),
+        ).fetchall()
+        invites = [{k: row[k] for k in row.keys()} for row in rows]
+        return jsonify({"ok": True, "invites": invites})
+
+    if not _user_is_manager(user):
+        return jsonify({"ok": False, "error": "Only managers can create invites."}), 403
+
+    payload = request.get_json(silent=True) or {}
+    max_uses_raw = clean_text(payload.get("max_uses"))
+    days_valid_raw = clean_text(payload.get("days_valid"))
+    max_uses = int(max_uses_raw) if max_uses_raw.isdigit() else 5
+    max_uses = max(1, min(max_uses, 50))
+    days_valid = int(days_valid_raw) if days_valid_raw.isdigit() else 7
+    days_valid = max(1, min(days_valid, 90))
+
+    invite_code = ""
+    for _ in range(6):
+        candidate = uuid.uuid4().hex[:8].upper()
+        exists = conn.execute("SELECT 1 FROM team_invites WHERE invite_code=?", (candidate,)).fetchone()
+        if not exists:
+            invite_code = candidate
+            break
+    if not invite_code:
+        return jsonify({"ok": False, "error": "Could not generate invite code."}), 500
+
+    conn.execute(
+        """
+        INSERT INTO team_invites(team_id, invite_code, max_uses, uses, expires_at, is_active, created_by_user_id)
+        VALUES(?, ?, ?, 0, datetime('now', ?), 1, ?)
+        """,
+        (team_id, invite_code, max_uses, f"+{days_valid} days", int(user.get("id") or 0)),
+    )
+    conn.commit()
+    return jsonify({"ok": True, "invite_code": invite_code, "max_uses": max_uses, "days_valid": days_valid})
+
+@bp.route("/api/team/outreach-target", methods=["POST"])
+@login_required()
+def api_team_outreach_target():
+    user = get_session_user()
+    team_id = int(user.get("team_id") or 0)
+    if team_id <= 0:
+        return jsonify({"ok": False, "error": "Not in a team."}), 400
+    if not _user_is_manager(user):
+        return jsonify({"ok": False, "error": "Only managers can update targets."}), 403
+    payload = request.get_json(silent=True) or {}
+    member_id_raw = clean_text(payload.get("member_id"))
+    target_raw = clean_text(payload.get("daily_target"))
+    if not member_id_raw.isdigit():
+        return jsonify({"ok": False, "error": "member_id is required"}), 400
+    if not target_raw.isdigit():
+        return jsonify({"ok": False, "error": "daily_target must be numeric"}), 400
+    target = max(0, min(int(target_raw), 200))
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    member = conn.execute(
+        "SELECT id FROM users WHERE id=? AND team_id=?",
+        (int(member_id_raw), team_id),
+    ).fetchone()
+    if member is None:
+        return jsonify({"ok": False, "error": "Member not found"}), 404
+    conn.execute(
+        "UPDATE users SET daily_outreach_target=? WHERE id=?",
+        (target, int(member_id_raw)),
+    )
+    conn.commit()
+    return jsonify({"ok": True, "member_id": int(member_id_raw), "daily_target": target})
+
+@bp.route("/api/team/summary")
+@login_required()
+def api_team_summary():
+    user = get_session_user()
+    team_id = int(user.get("team_id") or 0)
+    if team_id <= 0:
+        return jsonify({"ok": False, "error": "Not in a team."}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    team = conn.execute(
+        "SELECT id, name, invite_code, workspace_id, owner_user_id, created_at FROM teams WHERE id=?",
+        (team_id,),
+    ).fetchone()
+    if team is None:
+        return jsonify({"ok": False, "error": "Team not found."}), 404
+
+    members = conn.execute(
+        "SELECT id, username, account_name, team_role, daily_outreach_target FROM users WHERE team_id=? ORDER BY CASE WHEN lower(coalesce(team_role,'')) IN ('manager','owner') THEN 0 ELSE 1 END, username ASC",
+        (team_id,),
+    ).fetchall()
+    workspace_id = clean_text(team["workspace_id"])
+    counts = conn.execute(
+        """
+        SELECT created_by_user_id,
+               COUNT(*) AS total,
+               SUM(CASE WHEN lower(coalesce(status,''))='closed' THEN 1 ELSE 0 END) AS closed
+        FROM crm_contacts
+        WHERE workspace_id=?
+        GROUP BY created_by_user_id
+        """,
+        (workspace_id,),
+    ).fetchall()
+    count_map = {row["created_by_user_id"]: row for row in counts}
+    unattributed = count_map.get(None)
+    today_reachouts_rows = conn.execute(
+        """
+        SELECT created_by_user_id, COUNT(*) AS c
+        FROM crm_activities
+        WHERE workspace_id=?
+          AND action='outreach'
+          AND date(created_at)=date('now')
+        GROUP BY created_by_user_id
+        """,
+        (workspace_id,),
+    ).fetchall()
+    today_reachouts = {row["created_by_user_id"]: int(row["c"] or 0) for row in today_reachouts_rows}
+    month_reachouts_rows = conn.execute(
+        """
+        SELECT created_by_user_id, COUNT(*) AS c
+        FROM crm_activities
+        WHERE workspace_id=?
+          AND action='outreach'
+          AND date(created_at) >= date('now','start of month')
+        GROUP BY created_by_user_id
+        """,
+        (workspace_id,),
+    ).fetchall()
+    month_reachouts = {row["created_by_user_id"]: int(row["c"] or 0) for row in month_reachouts_rows}
+    month_closed_rows = conn.execute(
+        """
+        SELECT created_by_user_id, COUNT(*) AS c
+        FROM crm_contacts
+        WHERE workspace_id=?
+          AND lower(coalesce(status,''))='closed'
+          AND date(coalesce(updated_at, created_at)) >= date('now','start of month')
+        GROUP BY created_by_user_id
+        """,
+        (workspace_id,),
+    ).fetchall()
+    month_closed = {row["created_by_user_id"]: int(row["c"] or 0) for row in month_closed_rows}
+    source_rows = conn.execute(
+        """
+        SELECT COALESCE(NULLIF(source,''), 'Unknown') AS source, COUNT(*) AS c
+        FROM crm_activities
+        WHERE workspace_id=?
+          AND action='outreach'
+          AND date(created_at) >= date('now','start of month')
+        GROUP BY source
+        ORDER BY c DESC, source ASC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    monthly_reachouts_by_source = [{"source": row["source"], "count": int(row["c"] or 0)} for row in source_rows]
+    conversion_rows = conn.execute(
+        """
+        SELECT lower(coalesce(status,'')) AS status, COUNT(*) AS c
+        FROM crm_contacts
+        WHERE workspace_id=?
+        GROUP BY lower(coalesce(status,''))
+        """,
+        (workspace_id,),
+    ).fetchall()
+    status_counts = {clean_text(row["status"]).lower(): int(row["c"] or 0) for row in conversion_rows}
+    contacted_count = status_counts.get("contacted", 0) + status_counts.get("follow_up", 0) + status_counts.get("negotiating", 0) + status_counts.get("closed", 0)
+    replied_count = status_counts.get("follow_up", 0) + status_counts.get("negotiating", 0) + status_counts.get("closed", 0)
+    closed_total = status_counts.get("closed", 0)
+    conversion_rate = (closed_total / contacted_count) if contacted_count else 0
+    closed_month_total = conn.execute(
+        """
+        SELECT COUNT(*) AS c
+        FROM crm_contacts
+        WHERE workspace_id=?
+          AND lower(coalesce(status,''))='closed'
+          AND date(coalesce(updated_at, created_at)) >= date('now','start of month')
+        """,
+        (workspace_id,),
+    ).fetchone()
+    closed_month_total = int(closed_month_total["c"] or 0) if closed_month_total else 0
+    member_rows = []
+    for row in members:
+        stats = count_map.get(int(row["id"]))
+        total = int(stats["total"]) if stats else 0
+        closed = int(stats["closed"]) if stats and stats["closed"] is not None else 0
+        user_id = int(row["id"])
+        target = int(row["daily_outreach_target"] or 0)
+        member_rows.append(
+            {
+                "id": user_id,
+                "username": clean_text(row["username"]),
+                "account_name": clean_text(row["account_name"]),
+                "team_role": clean_text(row["team_role"]) or "member",
+                "total_contacts": total,
+                "closed_contacts": closed,
+                "open_contacts": max(total - closed, 0),
+                "daily_target": target,
+                "reachouts_today": int(today_reachouts.get(user_id) or 0),
+                "reachouts_month": int(month_reachouts.get(user_id) or 0),
+                "closed_month": int(month_closed.get(user_id) or 0),
+            }
+        )
+    unattributed_total = int(unattributed["total"]) if unattributed else 0
+    unattributed_closed = int(unattributed["closed"]) if unattributed and unattributed["closed"] is not None else 0
+
+    return jsonify(
+        {
+            "ok": True,
+            "team": {k: team[k] for k in team.keys()},
+            "current_role": clean_text(user.get("team_role")) or "member",
+            "members": member_rows,
+            "unattributed": {
+                "total_contacts": unattributed_total,
+                "closed_contacts": unattributed_closed,
+                "open_contacts": max(unattributed_total - unattributed_closed, 0),
+            },
+            "conversion": {
+                "contacted": contacted_count,
+                "replied": replied_count,
+                "closed": closed_total,
+                "rate": conversion_rate,
+            },
+            "monthly": {
+                "reachouts_by_source": monthly_reachouts_by_source,
+                "closed_deals": closed_month_total,
+            },
+        }
+    )
 
 @bp.route("/api/m/dashboard/snapshot")
 @login_required()
@@ -262,6 +746,9 @@ def api_m_crm_add_chapter():
         if "updated_at" in crm_cols:
             insert_cols.append("updated_at")
             insert_vals.append(datetime.now().isoformat(timespec="seconds"))
+        if "created_by_user_id" in crm_cols:
+            insert_cols.append("created_by_user_id")
+            insert_vals.append(int(user.get("id") or 0))
         if "manufacturer_id" in crm_cols:
             insert_cols.insert(0, "manufacturer_id")
             insert_vals.insert(0, manufacturer_id)
@@ -273,6 +760,15 @@ def api_m_crm_add_chapter():
         contact_id = int(cur.lastrowid)
         duplicate = False
 
+    if status == "contacted":
+        _log_outreach_activity(
+            conn,
+            int(contact_id),
+            int(user.get("id") or 0),
+            workspace_id,
+            "",
+            f"Marked {chapter_name} as contacted",
+        )
     if status == "closed":
         served_exists = conn.execute(
             """
@@ -397,6 +893,9 @@ def api_m_crm_add_vendor():
         if "updated_at" in crm_cols:
             insert_cols.append("updated_at")
             insert_vals.append(datetime.now().isoformat(timespec="seconds"))
+        if "created_by_user_id" in crm_cols:
+            insert_cols.append("created_by_user_id")
+            insert_vals.append(int(user.get("id") or 0))
         if "manufacturer_id" in crm_cols:
             insert_cols.insert(0, "manufacturer_id")
             insert_vals.insert(0, manufacturer_id)
@@ -408,6 +907,15 @@ def api_m_crm_add_vendor():
         contact_id = int(cur.lastrowid)
         duplicate = False
 
+    if status == "contacted":
+        _log_outreach_activity(
+            conn,
+            int(contact_id),
+            int(user.get("id") or 0),
+            workspace_id,
+            "",
+            f"Marked {vendor_name} as contacted",
+        )
     if status == "closed":
         served_exists = conn.execute(
             """
@@ -488,6 +996,8 @@ def api_m_crm():
             c.follow_up_date,
             c.updated_at,
             c.created_at,
+            c.created_by_user_id,
+            c.contact_source,
             (
                 SELECT COUNT(*)
                 FROM crm_notes n
@@ -506,7 +1016,12 @@ def api_m_crm():
         """,
         (workspace_id,),
     ).fetchall()
-    return jsonify({"ok": True, "rows": [{k: row[k] for k in row.keys()} for row in rows]})
+    out = []
+    for row in rows:
+        item = {k: row[k] for k in row.keys()}
+        item["can_delete"] = _can_delete_contact(user, item.get("created_by_user_id"))
+        out.append(item)
+    return jsonify({"ok": True, "rows": out})
 
 @bp.route("/api/m/crm/update", methods=["POST"])
 @login_required()
@@ -524,6 +1039,7 @@ def api_m_crm_update():
     if priority not in {"low", "normal", "high"}:
         priority = "normal"
     expected_close_date = clean_date(payload.get("expected_close_date"))
+    contact_source = clean_text(payload.get("contact_source"))
     value_estimate_raw = clean_text(payload.get("value_estimate"))
     value_estimate = None
     if value_estimate_raw:
@@ -539,11 +1055,12 @@ def api_m_crm_update():
     conn = get_connection()
     ensure_crm_tables(conn)
     existing = conn.execute(
-        "SELECT id, status, name, notes, follow_up_date, priority, value_estimate, expected_close_date FROM crm_contacts WHERE id=? AND workspace_id=?",
+        "SELECT id, status, name, notes, follow_up_date, priority, value_estimate, expected_close_date, contact_source FROM crm_contacts WHERE id=? AND workspace_id=?",
         (int(contact_id_raw), workspace_id),
     ).fetchone()
     if existing is None:
         return jsonify({"ok": False, "error": "contact not found"}), 404
+    existing_status = normalize_crm_status(existing["status"])
     touch_last_contact = bool(payload.get("touch_last_contact")) or status == "contacted"
     conn.execute(
         """
@@ -554,6 +1071,7 @@ def api_m_crm_update():
             priority=?,
             value_estimate=?,
             expected_close_date=?,
+            contact_source=?,
             last_contact_at=CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE last_contact_at END,
             updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND workspace_id=?
@@ -565,6 +1083,7 @@ def api_m_crm_update():
             priority,
             value_estimate,
             expected_close_date,
+            contact_source,
             1 if touch_last_contact else 0,
             int(contact_id_raw),
             workspace_id,
@@ -583,6 +1102,16 @@ def api_m_crm_update():
             workspace_id,
         ),
     )
+    if existing_status != "contacted" and status == "contacted":
+        source_hint = contact_source or clean_text(existing["contact_source"])
+        _log_outreach_activity(
+            conn,
+            int(contact_id_raw),
+            int(user.get("id") or 0),
+            workspace_id,
+            source_hint,
+            f"Marked {clean_text(existing['name']) or 'lead'} as contacted",
+        )
     log_activity(
         conn,
         int(user.get("id") or 0),
@@ -590,6 +1119,154 @@ def api_m_crm_update():
         "crm_contact",
         contact_id_raw,
         f"{clean_text(existing['status'])} -> {status}",
+        workspace_id=workspace_id,
+    )
+    conn.commit()
+    return jsonify({"ok": True})
+
+@bp.route("/api/m/crm/add-contact", methods=["POST"])
+@login_required()
+def api_m_crm_add_contact():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    payload = request.get_json(silent=True) or {}
+    name = clean_text(payload.get("name"))
+    contact_type = clean_text(payload.get("type")).lower() or "other"
+    if contact_type not in {"vendor", "chapter", "other"}:
+        contact_type = "other"
+    connection = clean_text(payload.get("connection"))
+    status = normalize_crm_status(payload.get("status"))
+    notes = clean_text(payload.get("notes"))
+    contact_source = clean_text(payload.get("contact_source"))
+    follow_up_date = clean_date(payload.get("follow_up_date"))
+    expected_close_date = clean_date(payload.get("expected_close_date"))
+    priority = clean_text(payload.get("priority")).lower() or "normal"
+    if priority not in {"low", "normal", "high"}:
+        priority = "normal"
+    if not name:
+        return jsonify({"ok": False, "error": "name is required"}), 400
+    if clean_text(payload.get("follow_up_date")) and not follow_up_date:
+        return jsonify({"ok": False, "error": "follow_up_date must be YYYY-MM-DD"}), 400
+    if clean_text(payload.get("expected_close_date")) and not expected_close_date:
+        return jsonify({"ok": False, "error": "expected_close_date must be YYYY-MM-DD"}), 400
+
+    value_estimate = payload.get("value_estimate")
+    try:
+        value_estimate = float(value_estimate) if value_estimate not in ("", None) else None
+    except Exception:
+        value_estimate = None
+
+    chapter_id = clean_text(payload.get("chapter_id"))
+    vendor_id_raw = clean_text(payload.get("vendor_id"))
+    vendor_id = int(vendor_id_raw) if vendor_id_raw.isdigit() else None
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    manufacturer_id = _manufacturer_id_from_user(conn, user)
+    crm_cols = {row[1] for row in conn.execute("PRAGMA table_info(crm_contacts)").fetchall()}
+    insert_cols = ["type", "name", "connection", "status", "notes", "workspace_id"]
+    insert_vals = [contact_type, name, connection, status, notes, workspace_id]
+    if "chapter_id" in crm_cols:
+        insert_cols.append("chapter_id")
+        insert_vals.append(chapter_id or None)
+    if "vendor_id" in crm_cols:
+        insert_cols.append("vendor_id")
+        insert_vals.append(vendor_id)
+    if "priority" in crm_cols:
+        insert_cols.append("priority")
+        insert_vals.append(priority)
+    if "value_estimate" in crm_cols:
+        insert_cols.append("value_estimate")
+        insert_vals.append(value_estimate)
+    if "follow_up_date" in crm_cols:
+        insert_cols.append("follow_up_date")
+        insert_vals.append(follow_up_date)
+    if "expected_close_date" in crm_cols:
+        insert_cols.append("expected_close_date")
+        insert_vals.append(expected_close_date)
+    if "updated_at" in crm_cols:
+        insert_cols.append("updated_at")
+        insert_vals.append(datetime.now().isoformat(timespec="seconds"))
+    if "contact_source" in crm_cols:
+        insert_cols.append("contact_source")
+        insert_vals.append(contact_source)
+    if "created_by_user_id" in crm_cols:
+        insert_cols.append("created_by_user_id")
+        insert_vals.append(int(user.get("id") or 0))
+    if "manufacturer_id" in crm_cols:
+        insert_cols.insert(0, "manufacturer_id")
+        insert_vals.insert(0, manufacturer_id)
+
+    placeholders = ",".join("?" for _ in insert_cols)
+    cur = conn.execute(
+        f"INSERT INTO crm_contacts({','.join(insert_cols)}) VALUES({placeholders})",
+        tuple(insert_vals),
+    )
+    contact_id = int(cur.lastrowid)
+    conn.execute(
+        """
+        INSERT INTO crm_activities(crm_contact_id, action, detail, created_by_user_id, workspace_id)
+        VALUES(?, 'manual_contact_added', ?, ?, ?)
+        """,
+        (contact_id, f"{name} ({contact_type})", int(user.get("id") or 0), workspace_id),
+    )
+    if status == "contacted":
+        _log_outreach_activity(
+            conn,
+            int(contact_id),
+            int(user.get("id") or 0),
+            workspace_id,
+            contact_source,
+            f"Added {name} as contacted",
+        )
+    log_activity(
+        conn,
+        int(user.get("id") or 0),
+        "added_manual_contact",
+        "crm_contact",
+        str(contact_id),
+        name,
+        workspace_id=workspace_id,
+    )
+    conn.commit()
+    return jsonify({"ok": True, "contact_id": contact_id})
+
+@bp.route("/api/m/crm/delete", methods=["POST"])
+@login_required()
+def api_m_crm_delete():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    payload = request.get_json(silent=True) or {}
+    contact_id_raw = clean_text(payload.get("contact_id"))
+    if not contact_id_raw.isdigit():
+        return jsonify({"ok": False, "error": "contact_id is required"}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    contact = conn.execute(
+        "SELECT id, name, created_by_user_id FROM crm_contacts WHERE id=? AND workspace_id=?",
+        (int(contact_id_raw), workspace_id),
+    ).fetchone()
+    if contact is None:
+        return jsonify({"ok": False, "error": "contact not found"}), 404
+    if not _can_delete_contact(user, contact["created_by_user_id"]):
+        return jsonify({"ok": False, "error": "You do not have permission to delete this contact."}), 403
+
+    conn.execute("DELETE FROM crm_notes WHERE crm_contact_id=? AND workspace_id=?", (int(contact_id_raw), workspace_id))
+    conn.execute("DELETE FROM crm_tasks WHERE crm_contact_id=? AND workspace_id=?", (int(contact_id_raw), workspace_id))
+    conn.execute("DELETE FROM crm_activities WHERE crm_contact_id=? AND workspace_id=?", (int(contact_id_raw), workspace_id))
+    conn.execute("DELETE FROM crm_contact_tags WHERE crm_contact_id=? AND workspace_id=?", (int(contact_id_raw), workspace_id))
+    if _table_has_column(conn, "messages", "workspace_id"):
+        conn.execute("DELETE FROM messages WHERE crm_contact_id=? AND workspace_id=?", (int(contact_id_raw), workspace_id))
+    conn.execute("DELETE FROM crm_contacts WHERE id=? AND workspace_id=?", (int(contact_id_raw), workspace_id))
+
+    log_activity(
+        conn,
+        int(user.get("id") or 0),
+        "deleted_contact",
+        "crm_contact",
+        contact_id_raw,
+        clean_text(contact["name"]),
         workspace_id=workspace_id,
     )
     conn.commit()
@@ -721,7 +1398,7 @@ def api_m_crm_contact_detail():
     contact = conn.execute(
         """
         SELECT id, name, type, connection, chapter_id, vendor_id, status, notes, priority,
-               value_estimate, expected_close_date, last_contact_at, follow_up_date, updated_at, created_at
+               value_estimate, expected_close_date, last_contact_at, follow_up_date, updated_at, created_at, created_by_user_id, contact_source
         FROM crm_contacts
         WHERE id=? AND workspace_id=?
         """,
@@ -774,10 +1451,13 @@ def api_m_crm_contact_detail():
         (int(contact_id_raw), workspace_id),
     ).fetchall()
 
+    contact_dict = {k: contact[k] for k in contact.keys()}
+    contact_dict["can_delete"] = _can_delete_contact(user, contact_dict.get("created_by_user_id"))
+
     return jsonify(
         {
             "ok": True,
-            "contact": {k: contact[k] for k in contact.keys()},
+            "contact": contact_dict,
             "notes": [{k: row[k] for k in row.keys()} for row in notes],
             "tasks": [{k: row[k] for k in row.keys()} for row in tasks],
             "timeline": [{k: row[k] for k in row.keys()} for row in activity_rows],
@@ -833,6 +1513,59 @@ def api_m_crm_add_note():
     )
     conn.commit()
     return jsonify({"ok": True, "id": int(cur.lastrowid)})
+
+@bp.route("/api/m/crm/outreach", methods=["POST"])
+@login_required()
+def api_m_crm_log_outreach():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    payload = request.get_json(silent=True) or {}
+    contact_id_raw = clean_text(payload.get("contact_id"))
+    source = clean_text(payload.get("source"))
+    note = clean_text(payload.get("note"))
+    if not contact_id_raw.isdigit():
+        return jsonify({"ok": False, "error": "contact_id is required"}), 400
+    if not source:
+        return jsonify({"ok": False, "error": "source is required"}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    contact = conn.execute(
+        "SELECT id, name FROM crm_contacts WHERE id=? AND workspace_id=?",
+        (int(contact_id_raw), workspace_id),
+    ).fetchone()
+    if contact is None:
+        return jsonify({"ok": False, "error": "contact not found"}), 404
+
+    detail = note[:240] if note else f"Outreach via {source}"
+    conn.execute(
+        """
+        INSERT INTO crm_activities(crm_contact_id, action, detail, source, created_by_user_id, workspace_id)
+        VALUES(?, 'outreach', ?, ?, ?, ?)
+        """,
+        (int(contact_id_raw), detail, source, int(user.get("id") or 0), workspace_id),
+    )
+    conn.execute(
+        """
+        UPDATE crm_contacts
+        SET last_contact_at=CURRENT_TIMESTAMP,
+            updated_at=CURRENT_TIMESTAMP,
+            contact_source=CASE WHEN trim(coalesce(contact_source,''))='' THEN ? ELSE contact_source END
+        WHERE id=? AND workspace_id=?
+        """,
+        (source, int(contact_id_raw), workspace_id),
+    )
+    log_activity(
+        conn,
+        int(user.get("id") or 0),
+        "logged_outreach",
+        "crm_contact",
+        contact_id_raw,
+        f"{clean_text(contact['name'])} via {source}",
+        workspace_id=workspace_id,
+    )
+    conn.commit()
+    return jsonify({"ok": True})
 
 @bp.route("/api/m/crm/task", methods=["POST"])
 @login_required()
@@ -1032,6 +1765,15 @@ def api_m_crm_board():
     today = date.today().isoformat()
     overdue_count = sum(1 for task in tasks if _iso_date(task.get("due_date")) and clean_text(task.get("due_date")) < today)
     due_today_count = sum(1 for task in tasks if clean_text(task.get("due_date")) == today)
+    contacted_count = len(stages.get("contacted", [])) + len(stages.get("follow_up", [])) + len(stages.get("negotiating", [])) + len(stages.get("closed", []))
+    replied_count = len(stages.get("follow_up", [])) + len(stages.get("negotiating", [])) + len(stages.get("closed", []))
+    closed_count = len(stages.get("closed", []))
+    conversion_rate = (closed_count / contacted_count) if contacted_count else 0
+    reachouts_total = conn.execute(
+        "SELECT COUNT(*) AS c FROM crm_activities WHERE workspace_id=? AND action='outreach'",
+        (workspace_id,),
+    ).fetchone()
+    reachouts_total = int(reachouts_total["c"] or 0) if reachouts_total else 0
 
     return jsonify(
         {
@@ -1044,6 +1786,11 @@ def api_m_crm_board():
                 "open_tasks": len(tasks),
                 "overdue_tasks": overdue_count,
                 "due_today_tasks": due_today_count,
+                "conversion_rate": conversion_rate,
+                "contacted_count": contacted_count,
+                "replied_count": replied_count,
+                "closed_count": closed_count,
+                "reachouts_total": reachouts_total,
             },
         }
     )
@@ -1146,6 +1893,23 @@ def api_m_messages_send():
         f"INSERT INTO messages({','.join(insert_cols)}) VALUES({placeholders})",
         tuple(insert_vals),
     )
+    if crm_contact_id:
+        conn.execute(
+            """
+            INSERT INTO crm_activities(crm_contact_id, action, detail, source, created_by_user_id, workspace_id)
+            VALUES(?, 'outreach', ?, 'Email', ?, ?)
+            """,
+            (int(crm_contact_id), subject[:240], int(user.get("id") or 0), workspace_id),
+        )
+        conn.execute(
+            """
+            UPDATE crm_contacts
+            SET last_contact_at=CURRENT_TIMESTAMP,
+                updated_at=CURRENT_TIMESTAMP
+            WHERE id=? AND workspace_id=?
+            """,
+            (int(crm_contact_id), workspace_id),
+        )
     log_activity(
         conn,
         int(user.get("id") or 0),
@@ -1456,6 +2220,17 @@ def api_institutions():
     parent_filter = clean_text(request.args.get("parent_name"))
     state_filter = clean_text(request.args.get("state"))
     city_filter = clean_text(request.args.get("city"))
+    level_filter = clean_text(request.args.get("institution_level"))
+    control_filter = clean_text(request.args.get("control"))
+    highest_filter = clean_text(request.args.get("highest_offering"))
+    locale_filter = clean_text(request.args.get("locale"))
+    degree_filter = clean_text(request.args.get("degree_granting_status"))
+    students_min_raw = clean_text(request.args.get("students_min"))
+    students_max_raw = clean_text(request.args.get("students_max"))
+    students_min = int(students_min_raw) if students_min_raw.isdigit() else None
+    students_max = int(students_max_raw) if students_max_raw.isdigit() else None
+    include_filters_raw = clean_text(request.args.get("include_filters")).lower()
+    include_filters = include_filters_raw in {"1", "true", "yes"}
 
     where = []
     params = []
@@ -1463,8 +2238,8 @@ def api_institutions():
         like = f"%{q}%"
         where.append(
             "("
-            "lower(location_name) LIKE ? OR lower(parent_name) LIKE ? OR "
-            "lower(city) LIKE ? OR lower(state) LIKE ? OR lower(general_phone) LIKE ?"
+            "lower(location_name) LIKE ? OR lower(alias) LIKE ? OR "
+            "lower(city) LIKE ? OR lower(state) LIKE ? OR lower(website) LIKE ?"
             ")"
         )
         params.extend([like, like, like, like, like])
@@ -1480,18 +2255,44 @@ def api_institutions():
     if city_filter:
         where.append("city = ?")
         params.append(city_filter)
+    if level_filter:
+        where.append("institution_level = ?")
+        params.append(level_filter)
+    if control_filter:
+        where.append("control = ?")
+        params.append(control_filter)
+    if highest_filter:
+        where.append("highest_offering = ?")
+        params.append(highest_filter)
+    if locale_filter:
+        where.append("locale = ?")
+        params.append(locale_filter)
+    if degree_filter:
+        where.append("degree_granting_status = ?")
+        params.append(degree_filter)
+    if students_min is not None:
+        where.append("students_total >= ?")
+        params.append(students_min)
+    if students_max is not None:
+        where.append("students_total <= ?")
+        params.append(students_max)
 
     where_sql = " WHERE " + " AND ".join(where) if where else ""
     total = conn.execute(
         f"SELECT COUNT(*) FROM institutions{where_sql}",
         tuple(params),
     ).fetchone()[0]
+    total_all = None
+    if include_filters:
+        total_all = conn.execute("SELECT COUNT(*) FROM institutions").fetchone()[0]
 
     rows = conn.execute(
         f"""
-        SELECT id, location_name, parent_name, location_type, address, street, city, state, zip,
+        SELECT id, location_name, alias, parent_name, location_type, address, street, city, state, zip,
                general_phone, admin_name, admin_phone, admin_email, fax, update_date,
-               dapip_id, ope_id, ipeds_unit_ids, parent_dapip_id
+               dapip_id, ope_id, ipeds_unit_ids, parent_dapip_id, unitid,
+               institution_level, control, highest_offering, degree_granting_status, locale, website,
+               students_total, dorm_capacity, acceptance_rate
         FROM institutions
         {where_sql}
         ORDER BY location_name ASC
@@ -1500,7 +2301,25 @@ def api_institutions():
         tuple(params + [limit, offset]),
     ).fetchall()
     out = [{k: row[k] for k in row.keys()} for row in rows]
-    return jsonify({"ok": True, "results": out, "total": int(total), "page": page})
+    payload = {"ok": True, "results": out, "total": int(total), "page": page}
+    if total_all is not None:
+        payload["total_all"] = int(total_all)
+    if include_filters:
+        def distinct(col_name: str) -> list[str]:
+            rows = conn.execute(
+                f"SELECT DISTINCT {col_name} AS v FROM institutions WHERE {col_name} IS NOT NULL AND TRIM({col_name}) != '' ORDER BY {col_name}"
+            ).fetchall()
+            return [row["v"] for row in rows]
+
+        payload["filters"] = {
+            "states": distinct("state"),
+            "institution_levels": distinct("institution_level"),
+            "controls": distinct("control"),
+            "highest_offerings": distinct("highest_offering"),
+            "locales": distinct("locale"),
+            "degree_statuses": distinct("degree_granting_status"),
+        }
+    return jsonify(payload)
 
 @bp.route("/api/leads/add", methods=["POST"])
 @login_required()

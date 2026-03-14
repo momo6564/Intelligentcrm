@@ -79,7 +79,7 @@ def get_session_user() -> dict:
     ensure_crm_tables(conn)
     ensure_default_users(conn)
     row = conn.execute(
-        "SELECT id, username, account_name, workspace_id, manufacturer_id, role FROM users WHERE id=?",
+        "SELECT id, username, account_name, workspace_id, manufacturer_id, role, team_id, team_role FROM users WHERE id=?",
         (int(user_id),),
     ).fetchone()
     if not row:

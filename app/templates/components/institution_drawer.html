@@ -1,21 +1,73 @@
 {% if not institution %}
   <div class="text-sm text-slate-500">Institution not found.</div>
 {% else %}
+  {% set website = institution.website or "" %}
+  {% set website_href = website %}
+  {% if website and "://" not in website %}
+    {% set website_href = "https://" + website %}
+  {% endif %}
+  {% set phone = institution.telephone or institution.general_phone %}
   <div class="space-y-4">
-    <div>
-      <div class="text-xs uppercase tracking-wide text-slate-500">Selected Institution</div>
-      <h3 class="text-lg font-semibold">{{ institution.location_name }}</h3>
-      <div class="text-xs text-slate-500">{{ institution.location_type or "-" }}</div>
+    <div class="flex items-start justify-between gap-2">
+      <div>
+        <div class="text-xs uppercase tracking-wide text-slate-500">Selected Institution</div>
+        <h3 class="text-lg font-semibold">{{ institution.location_name }}</h3>
+        <div class="text-xs text-slate-500">
+          {{ institution.city or "-" }}{% if institution.state %}, {{ institution.state }}{% endif %}
+        </div>
+      </div>
+      <a class="btn-ghost px-2 py-1 text-[11px]" href="/institutions/detail?institution_id={{ institution.id }}">Open profile</a>
     </div>
-    <dl class="grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 text-sm">
-      <dt class="text-slate-500">Parent</dt><dd>{{ institution.parent_name or "-" }}</dd>
-      <dt class="text-slate-500">Address</dt><dd>{{ institution.address or "-" }}</dd>
-      <dt class="text-slate-500">City</dt><dd>{{ institution.city or "-" }}</dd>
-      <dt class="text-slate-500">State</dt><dd>{{ institution.state or "-" }}</dd>
-      <dt class="text-slate-500">Zip</dt><dd>{{ institution.zip or "-" }}</dd>
-      <dt class="text-slate-500">Phone</dt><dd>{{ institution.general_phone or "-" }}</dd>
+
+    <div class="flex flex-wrap gap-1 text-[11px]">
+      {% if institution.control %}
+        <span class="rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 font-semibold">{{ institution.control }}</span>
+      {% endif %}
+      {% if institution.institution_level %}
+        <span class="rounded-full bg-amber-50 text-amber-700 px-2 py-0.5 font-semibold">{{ institution.institution_level }}</span>
+      {% endif %}
+      {% if institution.highest_offering %}
+        <span class="rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 font-semibold">{{ institution.highest_offering }}</span>
+      {% endif %}
+      {% if institution.degree_granting_status %}
+        <span class="rounded-full bg-violet-50 text-violet-700 px-2 py-0.5 font-semibold">{{ institution.degree_granting_status }}</span>
+      {% endif %}
+      {% if institution.locale %}
+        <span class="rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 font-semibold">{{ institution.locale }}</span>
+      {% endif %}
+    </div>
+
+    <dl class="grid grid-cols-[120px_1fr] gap-x-3 gap-y-1 text-sm">
+      <dt class="text-slate-500">Website</dt>
+      <dd>
+        {% if website %}
+          <a href="{{ website_href }}" target="_blank" rel="noopener" class="text-blue-700 hover:underline">{{ website }}</a>
+        {% else %}
+          -
+        {% endif %}
+      </dd>
+      <dt class="text-slate-500">Address</dt><dd>{{ institution.address or institution.street or "-" }}</dd>
+      <dt class="text-slate-500">Phone</dt><dd>{{ phone or "-" }}</dd>
       <dt class="text-slate-500">Admin</dt><dd>{{ institution.admin_name or "-" }}</dd>
       <dt class="text-slate-500">Admin Email</dt><dd>{{ institution.admin_email or "-" }}</dd>
     </dl>
+
+    <div class="panel-muted p-3 text-xs">
+      <div class="font-semibold text-slate-600">Quick stats</div>
+      <div class="mt-1">Chapters: {{ institution.chapter_count or 0 }}</div>
+      {% if institution.students_total %}
+        <div>Students: {{ "{:,}".format(institution.students_total) }}</div>
+      {% endif %}
+      {% if institution.dorm_capacity %}
+        <div>Dorm capacity: {{ "{:,}".format(institution.dorm_capacity) }}</div>
+      {% endif %}
+      {% if institution.acceptance_rate %}
+        {% if institution.acceptance_rate > 1 %}
+          <div>Acceptance rate: {{ institution.acceptance_rate }}%</div>
+        {% else %}
+          <div>Acceptance rate: {{ (institution.acceptance_rate * 100) | round(1) }}%</div>
+        {% endif %}
+      {% endif %}
+    </div>
   </div>
 {% endif %}

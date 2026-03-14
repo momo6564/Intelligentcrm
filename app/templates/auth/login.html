@@ -101,6 +101,14 @@
       <input name="password" type="password" autocomplete="current-password" required>
     </label>
     <button type="submit" class="btn">Login</button>
+    {% if google_enabled %}
+    <div class="meta">
+      Or continue with Google.
+      <div style="margin-top:8px;">
+        <a href="/google/login?next={{ next_path | urlencode }}" class="btn" style="display:inline-block;text-align:center;width:100%;text-decoration:none;">Sign in with Google</a>
+      </div>
+    </div>
+    {% endif %}
     <div class="subtitle">Need a new workspace? <a href="/signup">Create account</a></div>
     <div class="subtitle">Forgot password? <a href="/reset-password">Reset it</a></div>
   

@@ -10,9 +10,26 @@ class Config:
         "data",
         "Spreadsheet Of All Colleges And Universities export 2026-03-10 12-13-20.csv",
     )
+    ACCREDITED_INSTITUTIONS_CSV_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "data",
+        "US-Accredited-Institutions-Final.csv",
+    )
+    ACCREDITED_INSTITUTIONS_XLSX_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "data",
+        "US-Accredited-Institutions-Final.xlsx",
+    )
+    IPEDS_HD2024_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "hd2024.csv")
+    IPEDS_EF2024A_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ef2024a.csv")
+    IPEDS_IC2024_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ic2024.csv")
+    IPEDS_DRVADM2024_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "drvadm2024.csv")
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_SECURE = os.environ.get("FLASK_ENV", "").lower() == "production"
+    GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "")
     
     LEAD_STAGES = {"prospect", "contacted", "responded", "negotiating", "won", "lost"}
     SECURITY_QUESTIONS = [

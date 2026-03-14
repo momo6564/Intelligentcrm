@@ -15,6 +15,10 @@ def create_app(config_class=None):
         and app.config.get("SECRET_KEY") == "dev-secret-change-me"
     ):
         raise RuntimeError("FLASK_SECRET_KEY must be set in production.")
+    if app.config.get("SESSION_COOKIE_SECURE"):
+        redirect_hint = (app.config.get("GOOGLE_REDIRECT_URI") or "").lower()
+        if redirect_hint.startswith("http://"):
+            app.config["SESSION_COOKIE_SECURE"] = False
     project_root = os.path.dirname(os.path.dirname(__file__))
     legacy_db_path = os.path.join(project_root, "greek_chapters.db")
     active_db_path = os.path.abspath(app.config.get("DB_PATH") or "")
@@ -26,13 +30,35 @@ def create_app(config_class=None):
         )
 
     # Register blueprints (to be implemented)
-    from .routes import main, auth, api, chapters, vendors, institutions
+    from .routes import main, auth, api, chapters, vendors, institutions, team
     app.register_blueprint(main.bp)
     app.register_blueprint(auth.bp)
     app.register_blueprint(api.bp)
     app.register_blueprint(chapters.bp)
     app.register_blueprint(vendors.bp)
     app.register_blueprint(institutions.bp)
+    app.register_blueprint(team.bp)
+
+    # Initialize OAuth (Google)
+    try:
+        from authlib.integrations.flask_client import OAuth
+    except Exception:
+        OAuth = None
+
+    google_client_id = app.config.get("GOOGLE_CLIENT_ID") or ""
+    google_client_secret = app.config.get("GOOGLE_CLIENT_SECRET") or ""
+    if OAuth and google_client_id and google_client_secret:
+        oauth = OAuth(app)
+        google = oauth.register(
+            name="google",
+            client_id=google_client_id,
+            client_secret=google_client_secret,
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
+        app.google_oauth = google
+    else:
+        app.google_oauth = None
 
     from .database import close_connection
     app.teardown_appcontext(close_connection)

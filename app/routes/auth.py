@@ -1,7 +1,12 @@
-from flask import Blueprint, request, session, redirect, url_for, render_template
+from flask import Blueprint, request, session, redirect, url_for, render_template, current_app
 from werkzeug.security import check_password_hash, generate_password_hash
 import uuid
 from urllib.parse import urlsplit
+
+try:
+    from authlib.integrations.base_client.errors import MismatchingStateError
+except Exception:  # pragma: no cover - Authlib optional in some environments
+    MismatchingStateError = Exception
 
 from ..database import get_connection, ensure_crm_tables, ensure_default_users, log_activity, derive_workspace_id
 from ..config import Config
@@ -92,7 +97,13 @@ def _safe_next_path(raw: str) -> str:
 
 @bp.route("/login", methods=["GET", "POST"])
 def login_page():
-    error = ""
+    error = clean_text(request.args.get("error"))
+    if error == "google_state":
+        error = "Google sign-in expired. Please try again."
+    if error == "google_unavailable":
+        error = "Google sign-in is not configured on this server."
+    if error == "google_failed":
+        error = "Google sign-in failed. Please try again."
     next_path = _safe_next_path(request.args.get("next"))
     if request.method == "POST":
         username = clean_text(request.form.get("username"))
@@ -130,7 +141,8 @@ def login_page():
             if (next_path or "/") == "/":
                 return redirect(url_for("main.dashboard_page"))
             return redirect(next_path)
-    return render_template("auth/login.html", error=error, next_path=next_path)
+    google_enabled = bool(getattr(current_app, "google_oauth", None))
+    return render_template("auth/login.html", error=error, next_path=next_path, google_enabled=google_enabled)
 
 
 @bp.route("/signup", methods=["GET", "POST"])
@@ -201,7 +213,152 @@ def signup_page():
                 conn.commit()
                 session["user_id"] = user_id
                 return redirect(url_for("main.dashboard_page"))
-    return render_template("auth/signup.html", error=error, questions=Config.SECURITY_QUESTIONS)
+    google_enabled = bool(getattr(current_app, "google_oauth", None))
+    return render_template("auth/signup.html", error=error, questions=Config.SECURITY_QUESTIONS, google_enabled=google_enabled)
+
+
+@bp.route("/google/login")
+def google_login():
+    google = getattr(current_app, "google_oauth", None)
+    if google is None:
+        return redirect(url_for("auth.login_page", error="google_unavailable"))
+    next_path = _safe_next_path(request.args.get("next"))
+    session["google_next"] = next_path
+    nonce = uuid.uuid4().hex
+    session["google_nonce"] = nonce
+    redirect_uri = url_for("auth.google_callback", _external=True)
+    configured = clean_text(current_app.config.get("GOOGLE_REDIRECT_URI"))
+    if configured:
+        cfg = urlsplit(configured)
+        if cfg.scheme and cfg.netloc and cfg.netloc == request.host:
+            redirect_uri = configured
+    return google.authorize_redirect(redirect_uri, nonce=nonce)
+
+
+@bp.route("/google/callback")
+def google_callback():
+    google = getattr(current_app, "google_oauth", None)
+    if google is None:
+        return redirect(url_for("auth.login_page"))
+    try:
+        token = google.authorize_access_token()
+    except MismatchingStateError:
+        session.pop("google_next", None)
+        session.pop("google_nonce", None)
+        return redirect(url_for("auth.login_page", error="google_state"))
+    except Exception:
+        current_app.logger.exception("Google OAuth token exchange failed.")
+        return redirect(url_for("auth.login_page", error="google_failed"))
+    userinfo = None
+    try:
+        nonce = session.pop("google_nonce", None)
+        userinfo = google.parse_id_token(token, nonce=nonce)
+    except Exception:
+        current_app.logger.exception("Google OAuth id_token parsing failed.")
+        userinfo = None
+    if not userinfo:
+        try:
+            resp = google.get("https://openidconnect.googleapis.com/v1/userinfo", token=token)
+            if resp is not None and resp.ok:
+                userinfo = resp.json()
+            else:
+                current_app.logger.error("Google OAuth userinfo failed: %s", getattr(resp, "text", "no response"))
+        except Exception:
+            current_app.logger.exception("Google OAuth userinfo request failed.")
+    if not userinfo:
+        return redirect(url_for("auth.login_page", error="google_failed"))
+
+    google_id = clean_text(userinfo.get("sub"))
+    email = clean_text(userinfo.get("email")).lower()
+    full_name = clean_text(userinfo.get("name")) or clean_text(userinfo.get("given_name"))
+    if not email and not google_id:
+        return redirect(url_for("auth.login_page"))
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    ensure_default_users(conn)
+
+    user = None
+    if google_id:
+        user = conn.execute("SELECT * FROM users WHERE google_id=?", (google_id,)).fetchone()
+    if user is None and email:
+        user = conn.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (email,)).fetchone()
+
+    users_columns = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if user is None:
+        manufacturer_name = full_name or (email.split("@")[0] if email else "Google User")
+        manufacturer_id = None
+        if "manufacturer_id" in users_columns:
+            row = conn.execute("SELECT id FROM manufacturers WHERE lower(name)=lower(?)", (manufacturer_name,)).fetchone()
+            if row is None:
+                cur = conn.execute(
+                    "INSERT INTO manufacturers(name, contact_email) VALUES(?, ?)",
+                    (manufacturer_name, email),
+                )
+                manufacturer_id = int(cur.lastrowid)
+            else:
+                manufacturer_id = int(row["id"])
+        workspace_id = derive_workspace_id(manufacturer_name, email, 0)
+        username_seed = (email.split("@")[0] if email else "google_user").lower()
+        username = username_seed
+        suffix = 1
+        while conn.execute("SELECT 1 FROM users WHERE lower(username)=lower(?)", (username,)).fetchone():
+            suffix += 1
+            username = f"{username_seed}{suffix}"
+
+        cols = ["username", "password_hash", "account_name"]
+        vals = [username, generate_password_hash(uuid.uuid4().hex), manufacturer_name]
+        if "role" in users_columns:
+            cols.append("role")
+            vals.append("builder")
+        if "manufacturer_id" in users_columns and manufacturer_id is not None:
+            cols.append("manufacturer_id")
+            vals.append(manufacturer_id)
+        if "workspace_id" in users_columns:
+            cols.append("workspace_id")
+            vals.append(workspace_id)
+        if "google_id" in users_columns:
+            cols.append("google_id")
+            vals.append(google_id)
+        if "email" in users_columns:
+            cols.append("email")
+            vals.append(email)
+
+        query = f"INSERT INTO users ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
+        cur_user = conn.execute(query, tuple(vals))
+        user_id = int(cur_user.lastrowid)
+        if manufacturer_id:
+            log_activity(
+                conn,
+                user_id,
+                "google_signup",
+                "workspace",
+                workspace_id,
+                f"Google sign-up for {manufacturer_name}",
+                workspace_id=workspace_id,
+                manufacturer_id=manufacturer_id,
+            )
+        conn.commit()
+    else:
+        user_id = int(user["id"])
+        updates = []
+        params = []
+        if "google_id" in users_columns and google_id and not clean_text(user["google_id"]):
+            updates.append("google_id=?")
+            params.append(google_id)
+        if "email" in users_columns and email and not clean_text(user["email"]):
+            updates.append("email=?")
+            params.append(email)
+        if updates:
+            params.append(user_id)
+            conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
+            conn.commit()
+
+    session["user_id"] = int(user_id)
+    next_path = _safe_next_path(session.pop("google_next", "")) or "/"
+    if next_path == "/":
+        return redirect(url_for("main.dashboard_page"))
+    return redirect(next_path)
 
 
 @bp.route("/reset-password", methods=["GET", "POST"])

@@ -280,6 +280,33 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            invite_code TEXT UNIQUE NOT NULL,
+            workspace_id TEXT UNIQUE NOT NULL,
+            owner_user_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL,
+            invite_code TEXT UNIQUE NOT NULL,
+            max_uses INTEGER DEFAULT 1,
+            uses INTEGER DEFAULT 0,
+            expires_at TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_by_user_id INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
 
     vendor_order_columns = {row[1] for row in conn.execute("PRAGMA table_info(vendor_orders)").fetchall()}
     if "order_type" not in vendor_order_columns:
@@ -308,6 +335,16 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN security_question TEXT")
     if "security_answer_hash" not in users_columns:
         conn.execute("ALTER TABLE users ADD COLUMN security_answer_hash TEXT")
+    if "team_id" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN team_id INTEGER")
+    if "team_role" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN team_role TEXT")
+    if "daily_outreach_target" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN daily_outreach_target INTEGER")
+    if "google_id" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
+    if "email" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     crm_contact_columns = {row[1] for row in conn.execute("PRAGMA table_info(crm_contacts)").fetchall()}
     if "workspace_id" not in crm_contact_columns:
         conn.execute("ALTER TABLE crm_contacts ADD COLUMN workspace_id TEXT")
@@ -321,6 +358,12 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE crm_contacts ADD COLUMN expected_close_date TEXT")
     if "updated_at" not in crm_contact_columns:
         conn.execute("ALTER TABLE crm_contacts ADD COLUMN updated_at TEXT")
+    if "created_by_user_id" not in crm_contact_columns:
+        conn.execute("ALTER TABLE crm_contacts ADD COLUMN created_by_user_id INTEGER")
+    if "assigned_to_user_id" not in crm_contact_columns:
+        conn.execute("ALTER TABLE crm_contacts ADD COLUMN assigned_to_user_id INTEGER")
+    if "contact_source" not in crm_contact_columns:
+        conn.execute("ALTER TABLE crm_contacts ADD COLUMN contact_source TEXT")
     activities_columns = {row[1] for row in conn.execute("PRAGMA table_info(activities)").fetchall()}
     if "workspace_id" not in activities_columns:
         conn.execute("ALTER TABLE activities ADD COLUMN workspace_id TEXT")
@@ -355,6 +398,8 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     crm_activities_columns = {row[1] for row in conn.execute("PRAGMA table_info(crm_activities)").fetchall()}
     if "workspace_id" not in crm_activities_columns:
         conn.execute("ALTER TABLE crm_activities ADD COLUMN workspace_id TEXT")
+    if "source" not in crm_activities_columns:
+        conn.execute("ALTER TABLE crm_activities ADD COLUMN source TEXT")
 
     # Ensure every user has a stable workspace_id to preserve CRM ownership across sessions.
     missing_ws_users = conn.execute(
@@ -436,13 +481,17 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vendor_orders_workspace_vendor ON vendor_orders(workspace_id, vendor)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vendor_orders_workspace_chapter ON vendor_orders(workspace_id, chapter_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contacts_workspace ON crm_contacts(workspace_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contacts_workspace_owner ON crm_contacts(workspace_id, created_by_user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contacts_workspace_type_status ON crm_contacts(workspace_id, type, status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contacts_workspace_followup ON crm_contacts(workspace_id, follow_up_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_team_invites_team ON team_invites(team_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_team_invites_code ON team_invites(invite_code)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_workspace ON activities(workspace_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_workspace ON leads(workspace_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_tasks_workspace_due_status ON crm_tasks(workspace_id, due_date, status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_notes_workspace_contact ON crm_notes(workspace_id, crm_contact_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_activities_workspace_contact ON crm_activities(workspace_id, crm_contact_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_activities_workspace_action ON crm_activities(workspace_id, action, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contact_tags_workspace_contact ON crm_contact_tags(workspace_id, crm_contact_id)")
     conn.commit()
 
@@ -832,18 +881,72 @@ def ensure_institutions_table(conn: sqlite3.Connection) -> None:
         ("state_norm", "TEXT"),
         ("location_name_norm", "TEXT"),
         ("parent_name_norm", "TEXT"),
+        ("institution_id", "TEXT"),
+        ("alias", "TEXT"),
+        ("zip_five_digit", "TEXT"),
+        ("fips_state_code", "TEXT"),
+        ("telephone", "TEXT"),
+        ("ein", "TEXT"),
+        ("website", "TEXT"),
+        ("unitid", "TEXT"),
+        ("students_total", "INTEGER"),
+        ("dorm_capacity", "INTEGER"),
+        ("acceptance_rate", "REAL"),
+        ("institution_level", "TEXT"),
+        ("control", "TEXT"),
+        ("highest_offering", "TEXT"),
+        ("ug_offering", "TEXT"),
+        ("grad_offering", "TEXT"),
+        ("degree_granting_status", "TEXT"),
+        ("locale", "TEXT"),
+        ("public_status", "TEXT"),
+        ("post_secondary_status", "TEXT"),
+        ("fips_county_code", "TEXT"),
+        ("county", "TEXT"),
+        ("congressional_district", "TEXT"),
+        ("longitude", "REAL"),
+        ("latitude", "REAL"),
     ]
     for col, ctype in add_cols:
         if col not in columns:
             conn.execute(f"ALTER TABLE institutions ADD COLUMN {col} {ctype}")
 
-    if not os.path.exists(Config.INSTITUTIONS_CSV_PATH):
+    acc_csv_exists = os.path.exists(Config.ACCREDITED_INSTITUTIONS_CSV_PATH)
+    acc_xlsx_exists = os.path.exists(Config.ACCREDITED_INSTITUTIONS_XLSX_PATH)
+    hd_exists = os.path.exists(Config.IPEDS_HD2024_PATH)
+    ef_exists = os.path.exists(Config.IPEDS_EF2024A_PATH)
+    ic_exists = os.path.exists(Config.IPEDS_IC2024_PATH)
+    drv_exists = os.path.exists(Config.IPEDS_DRVADM2024_PATH)
+    if not acc_csv_exists and not acc_xlsx_exists and not hd_exists and not ef_exists and not ic_exists and not drv_exists:
         return
 
-    file_mtime = str(os.path.getmtime(Config.INSTITUTIONS_CSV_PATH))
-    prev = conn.execute("SELECT value FROM app_meta WHERE key='institutions_csv_mtime'").fetchone()
-    if prev and prev[0] == file_mtime:
-        return
+    acc_mtime = ""
+    if acc_csv_exists:
+        acc_mtime = str(os.path.getmtime(Config.ACCREDITED_INSTITUTIONS_CSV_PATH))
+    elif acc_xlsx_exists:
+        acc_mtime = str(os.path.getmtime(Config.ACCREDITED_INSTITUTIONS_XLSX_PATH))
+    hd_mtime = str(os.path.getmtime(Config.IPEDS_HD2024_PATH)) if hd_exists else ""
+    ef_mtime = str(os.path.getmtime(Config.IPEDS_EF2024A_PATH)) if ef_exists else ""
+    ic_mtime = str(os.path.getmtime(Config.IPEDS_IC2024_PATH)) if ic_exists else ""
+    drv_mtime = str(os.path.getmtime(Config.IPEDS_DRVADM2024_PATH)) if drv_exists else ""
+
+    prev_acc = conn.execute("SELECT value FROM app_meta WHERE key='institutions_accredited_mtime'").fetchone()
+    prev_hd = conn.execute("SELECT value FROM app_meta WHERE key='institutions_ipeds_hd2024_mtime'").fetchone()
+    prev_ef = conn.execute("SELECT value FROM app_meta WHERE key='institutions_ipeds_ef2024a_mtime'").fetchone()
+    prev_ic = conn.execute("SELECT value FROM app_meta WHERE key='institutions_ipeds_ic2024_mtime'").fetchone()
+    prev_drv = conn.execute("SELECT value FROM app_meta WHERE key='institutions_ipeds_drvadm2024_mtime'").fetchone()
+    source_tag = "ipeds_2024_combined_v4"
+    prev_source = conn.execute("SELECT value FROM app_meta WHERE key='institutions_source'").fetchone()
+    if prev_source and prev_acc and prev_hd and prev_ef and prev_ic and prev_drv:
+        if (
+            (prev_source[0] or "") == source_tag
+            and (prev_acc[0] or "") == acc_mtime
+            and (prev_hd[0] or "") == hd_mtime
+            and (prev_ef[0] or "") == ef_mtime
+            and (prev_ic[0] or "") == ic_mtime
+            and (prev_drv[0] or "") == drv_mtime
+        ):
+            return
 
     def parse_address(raw: str) -> tuple[str, str, str, str]:
         raw = clean_text(raw)
@@ -874,59 +977,431 @@ def ensure_institutions_table(conn: sqlite3.Connection) -> None:
                 state = norm_state(state_zip) or state_zip
         return street, city, state, zip_code
 
-    conn.execute("DELETE FROM institutions")
-    with open(Config.INSTITUTIONS_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        batch = []
-        for row in reader:
-            location_name = clean_text(row.get("LocationName"))
-            parent_name = clean_text(row.get("ParentName"))
-            address = clean_text(row.get("Address"))
-            street, city, state, zip_code = parse_address(address)
-            state_norm = norm_state(state) or clean_text(state)
-            batch.append(
-                (
-                    clean_text(row.get("DapipId")),
-                    clean_text(row.get("OpeId")),
-                    clean_text(row.get("IpedsUnitIds")),
-                    location_name,
-                    parent_name,
-                    clean_text(row.get("ParentDapipId")),
-                    clean_text(row.get("LocationType")),
-                    address,
-                    street,
-                    city,
-                    state,
-                    zip_code,
-                    clean_text(row.get("GeneralPhone")),
-                    clean_text(row.get("AdminName")),
-                    clean_text(row.get("AdminPhone")),
-                    clean_text(row.get("AdminEmail")),
-                    clean_text(row.get("Fax")),
-                    clean_text(row.get("UpdateDate")),
-                    state_norm,
-                    norm_org(location_name),
-                    norm_org(parent_name),
-                )
-            )
+    def name_key(name: str, state: str, city: str) -> tuple[str, str, str]:
+        return (norm_org(name), norm_state(state) or clean_text(state), clean_text(city).lower())
 
-    conn.executemany(
-        """
-        INSERT INTO institutions
-        (dapip_id, ope_id, ipeds_unit_ids, location_name, parent_name, parent_dapip_id, location_type, address,
-         street, city, state, zip, general_phone, admin_name, admin_phone, admin_email, fax, update_date,
-         state_norm, location_name_norm, parent_name_norm)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        batch,
+    def split_ipeds(raw: str) -> list[str]:
+        if not raw:
+            return []
+        parts = re.split(r"[;,\\s]+", raw)
+        return [p for p in parts if p and p.isdigit()]
+
+    def parse_int(raw: object):
+        val = clean_text(raw)
+        if not val:
+            return None
+        try:
+            return int(float(val))
+        except Exception:
+            return None
+
+    def parse_float(raw: object):
+        val = clean_text(raw)
+        if not val:
+            return None
+        try:
+            return float(val)
+        except Exception:
+            return None
+
+    def map_control(raw: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return {
+                "1": "Public Institution",
+                "2": "Private, Not-for-profit Institution",
+                "3": "Private, For-profit Institution",
+            }.get(val, val)
+        return val
+
+    def map_level(raw: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return {
+                "1": "4 year",
+                "2": "2 year",
+                "3": "Less than 2 year",
+            }.get(val, val)
+        return val
+
+    def map_degree_grant(raw: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return {
+                "1": "Degree-granting",
+                "2": "Nondegree-granting",
+            }.get(val, "")
+        return val
+
+    def map_highest_offering(raw: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return {
+                "1": "Less than 1 year",
+                "2": "At least 1 year but less than 2 years",
+                "3": "Associate's degree",
+                "4": "At least 2 but less than 4 years",
+                "5": "Bachelor's degree",
+                "6": "Postbaccalaureate certificate",
+                "7": "Master's degree",
+                "8": "Post-master's certificate",
+                "9": "Doctor's degree",
+            }.get(val, "")
+        return val
+
+    def map_offer(raw: str, label: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return f"Offers {label}" if val == "1" else f"No {label}" if val == "2" else ""
+        return val
+
+    def map_locale(raw: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return {
+                "11": "City: Large (250K+)",
+                "12": "City: Midsize (100-250K)",
+                "13": "City: Small (<100K)",
+                "21": "Suburb: Large (250K+)",
+                "22": "Suburb: Midsize (100-250K)",
+                "23": "Suburb: Small (<100K)",
+                "31": "Town: Fringe (<10 mi)",
+                "32": "Town: Distant (10-35 mi)",
+                "33": "Town: Remote (35+ mi)",
+                "41": "Rural: Fringe (<5 mi)",
+                "42": "Rural: Distant (5-25 mi)",
+                "43": "Rural: Remote (25+ mi)",
+            }.get(val, "")
+        return val
+
+    def map_public_status(raw: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return {
+                "1": "Open to public",
+                "2": "Not open to public",
+            }.get(val, "")
+        return val
+
+    def map_post_secondary(raw: str) -> str:
+        val = clean_text(raw)
+        if val.isdigit():
+            return {
+                "1": "Post-secondary",
+                "2": "Not post-secondary",
+            }.get(val, "")
+        return val
+
+    def merge_record(target: dict, updates: dict, overwrite: bool = True) -> None:
+        for key, value in updates.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            if overwrite or not clean_text(target.get(key)):
+                target[key] = value
+
+    def ensure_norm_fields(target: dict) -> None:
+        target["state_norm"] = norm_state(target.get("state")) or clean_text(target.get("state"))
+        target["location_name_norm"] = norm_org(target.get("location_name"))
+        target["parent_name_norm"] = norm_org(target.get("parent_name"))
+
+    if not prev_source or (prev_source[0] or "") != source_tag:
+        conn.execute("DELETE FROM institutions")
+        existing_rows = []
+    else:
+        existing_rows = conn.execute("SELECT * FROM institutions").fetchall()
+    records = {}
+    by_ope = {}
+    by_ipeds = {}
+    by_name = {}
+    new_by_ope = {}
+    new_by_ipeds = {}
+    new_by_name = {}
+
+    for row in existing_rows:
+        rec = {k: row[k] for k in row.keys()}
+        rec_id = int(rec["id"])
+        records[rec_id] = rec
+        ope_id = clean_text(rec.get("ope_id"))
+        if ope_id:
+            by_ope.setdefault(ope_id, rec_id)
+        for ipeds in split_ipeds(clean_text(rec.get("ipeds_unit_ids"))):
+            by_ipeds.setdefault(ipeds, rec_id)
+        key = name_key(clean_text(rec.get("location_name")), clean_text(rec.get("state")), clean_text(rec.get("city")))
+        if key[0]:
+            by_name.setdefault(key, rec_id)
+
+    def match_existing(updates: dict):
+        ope_id = clean_text(updates.get("ope_id"))
+        if ope_id and ope_id in by_ope:
+            return ("existing", by_ope[ope_id])
+        ipeds = clean_text(updates.get("institution_id"))
+        if not ipeds:
+            ipeds_list = split_ipeds(clean_text(updates.get("ipeds_unit_ids")))
+            ipeds = ipeds_list[0] if ipeds_list else ""
+        if ipeds and ipeds in by_ipeds:
+            return ("existing", by_ipeds[ipeds])
+        key = name_key(clean_text(updates.get("location_name")), clean_text(updates.get("state")), clean_text(updates.get("city")))
+        if key[0] and key in by_name:
+            return ("existing", by_name[key])
+        if ope_id and ope_id in new_by_ope:
+            return ("new", new_by_ope[ope_id])
+        if ipeds and ipeds in new_by_ipeds:
+            return ("new", new_by_ipeds[ipeds])
+        if key[0] and key in new_by_name:
+            return ("new", new_by_name[key])
+        return (None, None)
+
+    new_records: list[dict] = []
+
+    def load_accredited_rows() -> list[dict]:
+        if acc_csv_exists:
+            with open(Config.ACCREDITED_INSTITUTIONS_CSV_PATH, "r", encoding="utf-8-sig", newline="") as f:
+                reader = csv.DictReader(f)
+                return [dict(row) for row in reader]
+        if acc_xlsx_exists:
+            try:
+                from openpyxl import load_workbook
+            except Exception:
+                return []
+            wb = load_workbook(Config.ACCREDITED_INSTITUTIONS_XLSX_PATH, read_only=True, data_only=True)
+            ws = wb["DATA"] if "DATA" in wb.sheetnames else wb.active
+            header = None
+            header_row = None
+            for idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                if row and any(isinstance(v, str) and "INSTITUTION NAME" in v.upper() for v in row if v):
+                    header = [clean_text(v) for v in row]
+                    header_row = idx
+                    break
+            if not header or header_row is None:
+                return []
+            out = []
+            for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+                if not row or not any(v is not None and str(v).strip() != "" for v in row):
+                    continue
+                data = {}
+                for idx, col in enumerate(header):
+                    if not col:
+                        continue
+                    data[col] = row[idx] if idx < len(row) else None
+                out.append(data)
+            return out
+        return []
+
+    accredited_rows = load_accredited_rows()
+    for row in accredited_rows:
+        updates = {
+            "institution_id": clean_text(row.get("INSTITUTION ID")),
+            "unitid": clean_text(row.get("INSTITUTION ID")),
+            "location_name": clean_text(row.get("INSTITUTION NAME")),
+            "alias": clean_text(row.get("ALIAS")),
+            "address": clean_text(row.get("ADDRESS")),
+            "city": clean_text(row.get("CITY")),
+            "state": clean_text(row.get("STATE (ABRV)")),
+            "zip": clean_text(row.get("ZIP")),
+            "zip_five_digit": clean_text(row.get("ZIP_fiveDigit")),
+            "fips_state_code": clean_text(row.get("FIPS STATE COD")),
+            "telephone": clean_text(row.get("TELEPHONE")),
+            "ein": clean_text(row.get("EIN #")),
+            "ope_id": clean_text(row.get("OPE ID #")),
+            "website": clean_text(row.get("WEBSITE")),
+            "institution_level": clean_text(row.get("INSTITUTION LEVEL")),
+            "control": clean_text(row.get("CONTROL")),
+            "highest_offering": clean_text(row.get("HIGHEST OFFERING")),
+            "ug_offering": clean_text(row.get("UG OFFERING")),
+            "grad_offering": clean_text(row.get("GRAD OFFERING")),
+            "degree_granting_status": clean_text(row.get("DEGREE-GRANTING STATUS")),
+            "locale": clean_text(row.get("LOCALE")),
+            "public_status": clean_text(row.get("PUBLIC STATUS")),
+            "post_secondary_status": clean_text(row.get("POST SECONDARY STATUS")),
+            "fips_county_code": clean_text(row.get("FIPS COUNTY CODE")),
+            "county": clean_text(row.get("COUNTY")),
+            "congressional_district": clean_text(row.get("CONGRESSIONAL DISTRICT")),
+            "longitude": row.get("LONGITUDE"),
+            "latitude": row.get("LATITUDE"),
+        }
+        ensure_norm_fields(updates)
+        match_kind, match_id = match_existing(updates)
+        if match_kind == "existing":
+            merge_record(records[match_id], updates, overwrite=False)
+        elif match_kind == "new":
+            merge_record(new_records[match_id], updates, overwrite=False)
+        else:
+            new_records.append(dict(updates))
+            new_index = len(new_records) - 1
+            if updates.get("ope_id"):
+                new_by_ope.setdefault(clean_text(updates.get("ope_id")), new_index)
+            if updates.get("institution_id"):
+                new_by_ipeds.setdefault(clean_text(updates.get("institution_id")), new_index)
+            key = name_key(clean_text(updates.get("location_name")), clean_text(updates.get("state")), clean_text(updates.get("city")))
+            if key[0]:
+                new_by_name.setdefault(key, new_index)
+
+    def load_csv_column(path: str, value_col: str, parser, row_filter=None):
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames or "UNITID" not in reader.fieldnames or value_col not in reader.fieldnames:
+                return {}
+            out = {}
+            for row in reader:
+                if row_filter is not None and not row_filter(row):
+                    continue
+                unitid = clean_text(row.get("UNITID"))
+                if not unitid:
+                    continue
+                if unitid in out:
+                    continue
+                val = parser(row.get(value_col))
+                if val is None:
+                    continue
+                out[unitid] = val
+            return out
+
+    def ef_total_filter(row: dict) -> bool:
+        return clean_text(row.get("EFALEVEL")) == "1" and clean_text(row.get("LINE")) == "29" and clean_text(row.get("LSTUDY")) == "4"
+
+    students_map = load_csv_column(Config.IPEDS_EF2024A_PATH, "EFTOTLT", parse_int, row_filter=ef_total_filter)
+    dorm_map = load_csv_column(Config.IPEDS_IC2024_PATH, "ROOMCAP", parse_int)
+    accept_map = load_csv_column(Config.IPEDS_DRVADM2024_PATH, "ADM_RATE", parse_float)
+
+    if hd_exists:
+        with open(Config.IPEDS_HD2024_PATH, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                unitid = clean_text(row.get("UNITID"))
+                if not unitid:
+                    continue
+                updates = {
+                    "unitid": unitid,
+                    "institution_id": unitid,
+                    "ipeds_unit_ids": unitid,
+                    "location_name": clean_text(row.get("INSTNM")),
+                    "alias": clean_text(row.get("IALIAS")),
+                    "street": clean_text(row.get("ADDR")),
+                    "address": clean_text(row.get("ADDR")),
+                    "city": clean_text(row.get("CITY")),
+                    "state": clean_text(row.get("STABBR")),
+                    "zip": clean_text(row.get("ZIP")),
+                    "general_phone": clean_text(row.get("GENTELE")),
+                    "telephone": clean_text(row.get("GENTELE")),
+                    "ein": clean_text(row.get("EIN")),
+                    "ope_id": clean_text(row.get("OPEID")),
+                    "control": map_control(row.get("CONTROL")),
+                    "institution_level": map_level(row.get("ICLEVEL")),
+                    "highest_offering": map_highest_offering(row.get("HLOFFER")),
+                    "ug_offering": map_offer(row.get("UGOFFER"), "undergraduate programs"),
+                    "grad_offering": map_offer(row.get("GROFFER"), "graduate programs"),
+                    "degree_granting_status": map_degree_grant(row.get("DEGGRANT")),
+                    "locale": map_locale(row.get("LOCALE")),
+                    "public_status": map_public_status(row.get("OPENPUBL")),
+                    "post_secondary_status": map_post_secondary(row.get("POSTSEC")),
+                    "fips_state_code": clean_text(row.get("FIPS")),
+                    "fips_county_code": clean_text(row.get("COUNTYCD")),
+                    "county": clean_text(row.get("COUNTYNM")),
+                    "congressional_district": clean_text(row.get("CNGDSTCD")),
+                    "website": clean_text(row.get("WEBADDR")),
+                    "latitude": parse_float(row.get("LATITUDE")),
+                    "longitude": parse_float(row.get("LONGITUD")),
+                }
+                if unitid in students_map:
+                    updates["students_total"] = students_map[unitid]
+                if unitid in dorm_map:
+                    updates["dorm_capacity"] = dorm_map[unitid]
+                if unitid in accept_map:
+                    updates["acceptance_rate"] = accept_map[unitid]
+                ensure_norm_fields(updates)
+                match_kind, match_id = match_existing(updates)
+                if match_kind == "existing":
+                    merge_record(records[match_id], updates, overwrite=True)
+                elif match_kind == "new":
+                    merge_record(new_records[match_id], updates, overwrite=True)
+                else:
+                    new_records.append(dict(updates))
+                    new_index = len(new_records) - 1
+                    if updates.get("ope_id"):
+                        new_by_ope.setdefault(clean_text(updates.get("ope_id")), new_index)
+                    if updates.get("institution_id"):
+                        new_by_ipeds.setdefault(clean_text(updates.get("institution_id")), new_index)
+                    key = name_key(clean_text(updates.get("location_name")), clean_text(updates.get("state")), clean_text(updates.get("city")))
+                    if key[0]:
+                        new_by_name.setdefault(key, new_index)
+
+    table_info = conn.execute("PRAGMA table_info(institutions)").fetchall()
+    cols = [row[1] for row in table_info if row[1] != "id"]
+    if records:
+        update_rows = []
+        for rec_id, rec in records.items():
+            ensure_norm_fields(rec)
+            update_rows.append([rec.get(c) for c in cols] + [rec_id])
+        conn.executemany(
+            f"UPDATE institutions SET {', '.join([f'{c}=?' for c in cols])} WHERE id=?",
+            update_rows,
+        )
+
+    if new_records:
+        for rec in new_records:
+            ensure_norm_fields(rec)
+        insert_rows = [[rec.get(c) for c in cols] for rec in new_records]
+        placeholders = ",".join("?" for _ in cols)
+        conn.executemany(
+            f"INSERT INTO institutions({', '.join(cols)}) VALUES({placeholders})",
+            insert_rows,
+        )
+
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('institutions_accredited_mtime', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (acc_mtime,),
     )
     conn.execute(
-        "INSERT INTO app_meta(key, value) VALUES('institutions_csv_mtime', ?) "
+        "INSERT INTO app_meta(key, value) VALUES('institutions_ipeds_hd2024_mtime', ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (file_mtime,),
+        (hd_mtime,),
+    )
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('institutions_ipeds_ef2024a_mtime', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (ef_mtime,),
+    )
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('institutions_ipeds_ic2024_mtime', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (ic_mtime,),
+    )
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('institutions_ipeds_drvadm2024_mtime', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (drv_mtime,),
+    )
+    conn.execute(
+        "INSERT INTO app_meta(key, value) VALUES('institutions_source', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (source_tag,),
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_name ON institutions(location_name)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_state ON institutions(state)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_students ON institutions(students_total)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_control ON institutions(control)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_unitid ON institutions(unitid)")
+
+    # Refresh chapter links when institution data changes.
+    chapters_info = conn.execute("PRAGMA table_info(chapters)").fetchall()
+    if chapters_info:
+        inst_rows = conn.execute("SELECT id, location_name FROM institutions").fetchall()
+        inst_lookup = {norm_org(r["location_name"]): int(r["id"]) for r in inst_rows if norm_org(r["location_name"])}
+        chapter_rows = conn.execute("SELECT id, school, institution_id FROM chapters").fetchall()
+        updates = []
+        for row in chapter_rows:
+            school_norm = norm_org(row["school"])
+            inst_id = inst_lookup.get(school_norm)
+            if inst_id and (row["institution_id"] is None or int(row["institution_id"]) != inst_id):
+                updates.append((inst_id, int(row["id"])))
+        if updates:
+            conn.executemany("UPDATE chapters SET institution_id=? WHERE id=?", updates)
+
     conn.commit()
 
 def ensure_chapters_table(conn: sqlite3.Connection) -> None:

@@ -1,0 +1,209 @@
+{% extends "layouts/app_shell.html" %}
+{% block title %}Team Workspace{% endblock %}
+{% block page_title %}Team Workspace{% endblock %}
+{% block page_subtitle %}Invite teammates and share your CRM pipeline{% endblock %}
+{% block content %}
+<div x-data="teamSetup()" x-init="load()" class="space-y-4">
+  <div class="panel p-4">
+    <template x-if="loading">
+      <div class="animate-pulse space-y-2">
+        <div class="h-4 w-40 rounded bg-slate-200"></div>
+        <div class="h-16 rounded-xl bg-slate-100"></div>
+      </div>
+    </template>
+    <template x-if="!loading && team">
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs uppercase text-slate-500">Current Team</div>
+          <div class="text-lg font-semibold" x-text="team.name"></div>
+          <div class="text-xs text-slate-500">Role: <span x-text="role || 'member'"></span></div>
+        </div>
+        <div class="panel-muted p-3">
+          <div class="text-xs uppercase text-slate-500">Team Dashboard</div>
+          <div class="text-sm text-slate-600">View member activity and closed deals.</div>
+          <a href="/team/dashboard" class="mt-2 inline-block btn-primary px-3 py-1.5 text-xs">Open Dashboard</a>
+        </div>
+        <div class="panel-muted p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div class="text-xs uppercase text-slate-500">Invites</div>
+              <div class="text-sm text-slate-600">Share an invite code to add members.</div>
+            </div>
+            <button type="button" x-show="isManager" @click="createInvite()" class="btn-primary px-3 py-1.5 text-xs">Generate Invite</button>
+          </div>
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="table-head text-xs uppercase text-slate-500">
+                <tr>
+                  <th class="text-left px-3 py-2">Code</th>
+                  <th class="text-left px-3 py-2">Uses</th>
+                  <th class="text-left px-3 py-2">Expires</th>
+                  <th class="text-left px-3 py-2">Status</th>
+                  <th class="text-left px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="invite in invites" :key="invite.id">
+                  <tr class="border-b border-slate-100">
+                    <td class="px-3 py-2 font-medium tracking-widest" x-text="invite.invite_code"></td>
+                    <td class="px-3 py-2" x-text="`${invite.uses || 0}/${invite.max_uses || 0}`"></td>
+                    <td class="px-3 py-2" x-text="invite.expires_at || '-'"></td>
+                    <td class="px-3 py-2" x-text="(invite.is_active ? 'Active' : 'Inactive')"></td>
+                    <td class="px-3 py-2">
+                      <button type="button" @click="copyInvite(invite.invite_code)" class="btn-ghost px-2 py-1 text-xs">Copy</button>
+                    </td>
+                  </tr>
+                </template>
+                <tr x-show="invites.length===0">
+                  <td colspan="5" class="px-3 py-4 text-center text-slate-500">No invites yet.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </template>
+    <template x-if="!loading && !team">
+      <div class="space-y-4">
+        <div class="panel-muted p-3">
+          <div class="text-xs uppercase text-slate-500">Create Team</div>
+          <div class="text-sm text-slate-600 mb-2">Create a team for your company and invite members.</div>
+          <div class="grid md:grid-cols-[1fr_auto] gap-2">
+            <input x-model="createName" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Team name (company)">
+            <button type="button" @click="createTeam()" class="btn-primary px-3 py-2 text-sm">Create</button>
+          </div>
+        </div>
+        <div class="panel-muted p-3">
+          <div class="text-xs uppercase text-slate-500">Join Team</div>
+          <div class="text-sm text-slate-600 mb-2">Use a manager-provided invite code.</div>
+          <div class="grid md:grid-cols-[1fr_auto] gap-2">
+            <input x-model="joinCode" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Invite code">
+            <button type="button" @click="joinTeam()" class="btn-ghost px-3 py-2 text-sm">Join</button>
+          </div>
+          <div x-show="joinError" class="mt-2 text-xs text-rose-700" x-text="joinError"></div>
+          <div x-show="Object.keys(joinCounts || {}).length" class="mt-2 text-xs text-slate-500">
+            <div class="font-semibold text-slate-600">Detected CRM data:</div>
+            <div class="grid grid-cols-2 gap-1 mt-1">
+              <template x-for="entry in Object.entries(joinCounts)" :key="entry[0]">
+                <div x-text="`${entry[0]}: ${entry[1]}`"></div>
+              </template>
+            </div>
+          </div>
+          <div x-show="joinError && Object.keys(joinCounts || {}).length" class="mt-2">
+            <button type="button" @click="forceJoin()" class="btn-primary px-3 py-1.5 text-xs">Join and discard my CRM data</button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function teamSetup(){
+  return {
+    loading: false,
+    team: null,
+    role: "",
+    invites: [],
+    createName: "",
+    joinCode: "",
+    joinError: "",
+    joinCounts: {},
+    async load(){
+      this.loading = true;
+      try{
+        const out = await fetch("/api/team/status").then(r=>r.json());
+        if(out.ok){
+          this.team = out.team;
+          this.role = out.role || "";
+        }
+        if(this.team){
+          const inv = await fetch("/api/team/invites").then(r=>r.json());
+          this.invites = inv.ok ? (inv.invites || []) : [];
+        }
+      }finally{
+        this.loading = false;
+      }
+    },
+    async createTeam(){
+      const out = await fetch("/api/team/create", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({name: this.createName}),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not create team", "error");
+        return;
+      }
+      this.createName = "";
+      await this.load();
+      (window.appToast || alert)("Team created", "success");
+    },
+    async joinTeam(){
+      const out = await fetch("/api/team/join", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({invite_code: this.joinCode}),
+      }).then(r=>r.json());
+      if(!out.ok){
+        this.joinError = out.error || "Could not join team";
+        this.joinCounts = out.counts || {};
+        if(!out.can_force){
+          (window.appToast || alert)(this.joinError, "error");
+        }
+        return;
+      }
+      this.joinCode = "";
+      this.joinError = "";
+      this.joinCounts = {};
+      await this.load();
+      (window.appToast || alert)("Joined team", "success");
+    },
+    async forceJoin(){
+      const out = await fetch("/api/team/join", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({invite_code: this.joinCode, force: true}),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not join team", "error");
+        return;
+      }
+      this.joinCode = "";
+      this.joinError = "";
+      this.joinCounts = {};
+      await this.load();
+      (window.appToast || alert)("Joined team", "success");
+    },
+    get isManager(){
+      return (this.role || "").toLowerCase() === "manager";
+    },
+    async createInvite(){
+      const out = await fetch("/api/team/invites", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({max_uses: 5, days_valid: 7}),
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not create invite", "error");
+        return;
+      }
+      await this.load();
+      (window.appToast || alert)("Invite created", "success");
+    },
+    async copyInvite(code){
+      const value = code || "";
+      if(!value) return;
+      try{
+        await navigator.clipboard.writeText(value);
+        (window.appToast || alert)("Invite code copied", "success");
+      }catch(_err){
+        (window.appToast || alert)("Copy failed", "error");
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

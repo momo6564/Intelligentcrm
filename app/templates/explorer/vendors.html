@@ -1,133 +1,156 @@
-{% extends "layouts/app_shell.html" %}
+﻿{% extends "layouts/app_shell.html" %}
 {% block title %}Vendor Explorer{% endblock %}
 {% block page_title %}Vendor Explorer{% endblock %}
-{% block page_subtitle %}Filter left, compare center, inspect right{% endblock %}
+{% block page_subtitle %}Search, filter, and open vendor profiles{% endblock %}
+{% block main_grid %}xl:grid-cols-1{% endblock %}
 {% block content %}
+<style>[x-cloak]{display:none!important;}</style>
 <div x-data="vendorsApp()" x-init="load()" class="space-y-4">
-  <div class="grid xl:grid-cols-[320px_1fr] gap-4">
-    <div class="panel p-4 space-y-3 xl:sticky xl:top-4 h-fit">
-      <h3 class="font-semibold">Filters</h3>
-      <input x-model="search" @input="debounceApply()" placeholder="Search vendor, organization, state, category, type" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-      <select x-model="filters.organization" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All organizations</option>
-        <template x-for="v in options.organizations"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.category" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All products/categories</option>
-        <template x-for="v in options.categories"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.license" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All vendor types</option>
-        <template x-for="v in options.licenses"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.state" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All states</option>
-        <template x-for="v in options.states"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.city" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All cities</option>
-        <template x-for="v in options.cities"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.crmStage" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All CRM stages</option>
-        <option value="prospect">Prospect</option>
-        <option value="contacted">Contacted</option>
-        <option value="follow_up">Follow Up</option>
-        <option value="negotiating">Negotiating</option>
-        <option value="closed">Served</option>
-        <option value="dormant">Dormant</option>
-      </select>
-      <button @click="reset()" class="w-full btn-ghost">Reset Filters</button>
-    </div>
-
-    <div class="panel overflow-hidden">
-      <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center gap-2 justify-between text-sm">
-        <span class="font-medium" x-text="loading ? 'Loading vendors...' : `${rows.length} of ${total} vendors`"></span>
-        <div class="flex flex-wrap items-center gap-2">
-          <select x-model="sortBy" @change="apply()" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">
-            <option value="vendor">Sort: Vendor</option>
-            <option value="organization">Sort: Organization</option>
-            <option value="category">Sort: Category</option>
-            <option value="state">Sort: State</option>
-            <option value="crm_stage">Sort: CRM Stage</option>
-          </select>
-          <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="toggleSortDir()" x-text="sortDir==='asc' ? 'Asc' : 'Desc'"></button>
-          <div class="relative">
-            <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="showColumnMenu = !showColumnMenu">Columns</button>
-            <div x-show="showColumnMenu" @click.outside="showColumnMenu=false" class="absolute right-0 mt-2 z-20 w-52 rounded-xl border border-slate-200 bg-white shadow p-2 space-y-1 text-xs">
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.vendor"> Vendor</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.license"> Type</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.organization"> Organization</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.category"> Category</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.phone"> Phone</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.crm"> CRM</label>
-            </div>
-          </div>
-        </div>
+  <div class="panel p-4 space-y-3">
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="flex-1 min-w-[220px]">
+        <input x-model="search" @input="debounceApply()" placeholder="Search vendors, organizations, categories, states..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
       </div>
-      <div class="overflow-y-auto overflow-x-hidden max-h-[68vh]">
-        <table class="w-full text-sm table-fixed">
-          <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
-            <tr>
-              <th x-show="visibleColumns.vendor" class="text-left px-3 py-2">Vendor</th>
-              <th x-show="visibleColumns.license" class="text-left px-3 py-2">Type</th>
-              <th x-show="visibleColumns.organization" class="text-left px-3 py-2">Organization</th>
-              <th x-show="visibleColumns.category" class="text-left px-3 py-2">Category</th>
-              <th x-show="visibleColumns.phone" class="text-left px-3 py-2">Phone</th>
-              <th x-show="visibleColumns.crm" class="text-left px-3 py-2">CRM</th>
-              <th class="text-left px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr x-show="loading">
-              <td :colspan="visibleColumnCount()" class="px-3 py-4">
-                <div class="animate-pulse space-y-2">
-                  <div class="h-3 w-2/3 rounded bg-slate-200"></div>
-                  <div class="h-3 w-1/2 rounded bg-slate-200"></div>
-                  <div class="h-3 w-3/4 rounded bg-slate-200"></div>
+      <select x-model="filters.organization" @change="apply()" class="min-w-[180px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All organizations</option>
+        <template x-for="v in options.organizations" :key="v"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.category" @change="apply()" class="min-w-[180px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All categories</option>
+        <template x-for="v in options.categories" :key="v"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.license" @change="apply()" class="min-w-[170px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All vendor types</option>
+        <template x-for="v in options.licenses" :key="v"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.state" @change="apply()" class="min-w-[120px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All states</option>
+        <template x-for="v in options.states" :key="v"><option :value="v" x-text="v"></option></template>
+      </select>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="showAdvanced = true">More Filters</button>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="reset()">Reset</button>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+      <span x-text="summaryLine()"></span>
+      <div class="flex items-center gap-2">
+        <select x-model="sortBy" @change="apply()" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">
+          <option value="vendor">Sort: Vendor</option>
+          <option value="organization">Sort: Organization</option>
+          <option value="category">Sort: Category</option>
+          <option value="state">Sort: State</option>
+          <option value="crm_stage">Sort: CRM Stage</option>
+        </select>
+        <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="toggleSortDir()" x-text="sortDir==='asc' ? 'Asc' : 'Desc'"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel overflow-hidden">
+    <div class="overflow-y-auto overflow-x-hidden max-h-[70vh]">
+      <table class="w-full text-sm table-fixed">
+        <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
+          <tr>
+            <th class="text-left px-3 py-2 w-[32%]">Vendor</th>
+            <th class="text-left px-3 py-2">Organization</th>
+            <th class="text-left px-3 py-2">Category</th>
+            <th class="text-left px-3 py-2 w-[80px]">State</th>
+            <th class="text-left px-3 py-2">CRM</th>
+            <th class="text-left px-3 py-2 w-[160px]">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr x-show="loading">
+            <td colspan="6" class="px-3 py-4">
+              <div class="animate-pulse space-y-2">
+                <div class="h-3 w-2/3 rounded bg-slate-200"></div>
+                <div class="h-3 w-1/2 rounded bg-slate-200"></div>
+                <div class="h-3 w-3/4 rounded bg-slate-200"></div>
+              </div>
+            </td>
+          </tr>
+          <template x-for="r in rows" :key="r.id">
+            <tr class="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer" @click="openDrawer(r.id)">
+              <td class="px-3 py-3">
+                <div class="font-semibold text-slate-800 truncate">
+                  <a class="text-blue-700 hover:underline" @click.stop :href="`/vendors/detail?vendor_id=${encodeURIComponent(r.id)}`" x-text="r.vendor || '-'" ></a>
+                </div>
+                <div class="text-xs text-slate-500 truncate" x-show="r.website" x-text="r.website"></div>
+                <div class="flex flex-wrap gap-1 mt-1">
+                  <span x-show="r.license_label" class="rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[11px] font-semibold" x-text="r.license_label"></span>
+                </div>
+              </td>
+              <td class="px-3 py-2 truncate" x-text="r.organization || '-'"></td>
+              <td class="px-3 py-2 truncate" x-text="r.category || '-'"></td>
+              <td class="px-3 py-2" x-text="r.state || '-'"></td>
+              <td class="px-3 py-2">
+                <span x-show="r.crm_stage==='closed'" class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-xs">Served</span>
+                <span x-show="r.crm_stage==='prospect'" class="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-xs">Prospect</span>
+                <span x-show="r.crm_stage==='contacted'" class="rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-xs">Contacted</span>
+                <span x-show="r.crm_stage==='follow_up'" class="rounded-full bg-cyan-100 text-cyan-700 px-2 py-0.5 text-xs">Follow Up</span>
+                <span x-show="r.crm_stage==='negotiating'" class="rounded-full bg-violet-100 text-violet-700 px-2 py-0.5 text-xs">Negotiating</span>
+                <span x-show="r.crm_stage==='dormant'" class="rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-xs">Dormant</span>
+                <span x-show="!r.crm_stage" class="text-slate-400 text-xs">-</span>
+              </td>
+              <td class="px-3 py-2">
+                <div class="flex items-center gap-1" @click.stop>
+                  <button class="btn-ghost px-2 py-1 text-[11px]" @click="quickAdd('prospect', r)">Prospect</button>
+                  <button class="btn-ghost px-2 py-1 text-[11px]" @click="quickAdd('served', r)">Served</button>
+                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/vendors/detail?vendor_id=${encodeURIComponent(r.id)}`">Details</a>
                 </div>
               </td>
             </tr>
-            <template x-for="r in rows" :key="r.id">
-              <tr class="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer"
-                  @click="openDrawer(r.id)">
-                <td x-show="visibleColumns.vendor" class="px-3 py-2 truncate" x-text="r.vendor || '-'"></td>
-                <td x-show="visibleColumns.license" class="px-3 py-2 truncate" x-text="r.license_label || '-'"></td>
-                <td x-show="visibleColumns.organization" class="px-3 py-2 truncate" x-text="r.organization || '-'"></td>
-                <td x-show="visibleColumns.category" class="px-3 py-2 truncate" x-text="r.category || '-'"></td>
-                <td x-show="visibleColumns.phone" class="px-3 py-2 truncate" x-text="r.phone || '-'"></td>
-                <td x-show="visibleColumns.crm" class="px-3 py-2">
-                  <span x-show="r.crm_stage==='closed'" class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-xs">Served</span>
-                  <span x-show="r.crm_stage==='prospect'" class="rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-xs">Prospect</span>
-                  <span x-show="r.crm_stage==='contacted'" class="rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-xs">Contacted</span>
-                  <span x-show="r.crm_stage==='follow_up'" class="rounded-full bg-cyan-100 text-cyan-700 px-2 py-0.5 text-xs">Follow Up</span>
-                  <span x-show="r.crm_stage==='negotiating'" class="rounded-full bg-violet-100 text-violet-700 px-2 py-0.5 text-xs">Negotiating</span>
-                  <span x-show="r.crm_stage==='dormant'" class="rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-xs">Dormant</span>
-                  <span x-show="!r.crm_stage" class="text-slate-400 text-xs">-</span>
-                  <div class="text-[11px] text-slate-500" x-show="r.follow_up_date || r.open_task_count">
-                    <span x-show="r.follow_up_date" x-text="`Follow-up: ${r.follow_up_date}`"></span>
-                    <span x-show="r.open_task_count" x-text="` | Tasks: ${r.open_task_count}`"></span>
-                  </div>
-                </td>
-                <td class="px-3 py-2">
-                  <div class="flex items-center gap-1" @click.stop>
-                    <button class="btn-ghost px-2 py-1 text-[11px]" @click="quickAdd('prospect', r)">Prospect</button>
-                    <button class="btn-ghost px-2 py-1 text-[11px]" @click="quickAdd('served', r)">Served</button>
-                    <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/vendors/detail?vendor_id=${encodeURIComponent(r.id)}`">Details</a>
-                  </div>
-                </td>
-              </tr>
-            </template>
-            <tr x-show="!loading && rows.length===0">
-              <td :colspan="visibleColumnCount()" class="px-3 py-8 text-center text-slate-500">No vendors match your filters.</td>
-            </tr>
-          </tbody>
-        </table>
+          </template>
+          <tr x-show="!loading && rows.length===0">
+            <td colspan="6" class="px-3 py-8 text-center text-slate-500">No vendors match your filters.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
+      <span class="text-slate-500" x-text="footerLine()"></span>
+      <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
+    </div>
+  </div>
+
+  <div x-show="showAdvanced" x-cloak class="fixed inset-0 z-30">
+    <div class="absolute inset-0 bg-slate-900/20" @click="showAdvanced=false"></div>
+    <div class="absolute right-4 top-24 w-full max-w-md panel p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold">Advanced Filters</div>
+        <button class="btn-ghost px-2 py-1 text-xs" @click="showAdvanced=false">Close</button>
       </div>
-      <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
-        <span class="text-slate-500" x-text="`Showing ${rows.length} records`"></span>
-        <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
+      <div class="grid gap-2">
+        <select x-model="filters.city" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="">All cities</option>
+          <template x-for="v in options.cities" :key="v"><option :value="v" x-text="v"></option></template>
+        </select>
+        <select x-model="filters.crmStage" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="">All CRM stages</option>
+          <option value="prospect">Prospect</option>
+          <option value="contacted">Contacted</option>
+          <option value="follow_up">Follow Up</option>
+          <option value="negotiating">Negotiating</option>
+          <option value="closed">Served</option>
+          <option value="dormant">Dormant</option>
+        </select>
       </div>
+    </div>
+  </div>
+
+  <div x-show="drawerOpen" x-cloak class="fixed inset-0 z-40">
+    <div class="absolute inset-0 bg-slate-900/20" @click="closeDrawer()"></div>
+    <div class="absolute right-0 top-0 h-full w-full max-w-[420px] panel rounded-none rounded-l-2xl p-4 overflow-y-auto"
+         x-transition:enter="transition transform duration-200"
+         x-transition:enter-start="translate-x-full"
+         x-transition:enter-end="translate-x-0"
+         x-transition:leave="transition transform duration-150"
+         x-transition:leave-start="translate-x-0"
+         x-transition:leave-end="translate-x-full">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-xs uppercase tracking-wide text-slate-500">Vendor details</div>
+        <button class="btn-ghost px-2 py-1 text-xs" @click="closeDrawer()">Close</button>
+      </div>
+      <div x-html="drawerHtml"></div>
     </div>
   </div>
 </div>
@@ -137,21 +160,11 @@ function vendorsApp(){
   return {
     rows:[], search:"", total:0, pageSize:50, page:1,
     loading:false, searchTimer:null, drawerController:null,
-    sortBy:"vendor", sortDir:"asc", showColumnMenu:false,
-    visibleColumns:{vendor:true, license:true, organization:true, category:true, phone:true, crm:true},
+    drawerOpen:false, drawerHtml:"", showAdvanced:false,
+    sortBy:"vendor", sortDir:"asc",
     filters:{organization:"",category:"",state:"",city:"",license:"",crmStage:""},
     options:{organizations:[],categories:[],states:[],cities:[],licenses:[]},
     uniq(values){ return [...new Set(values.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b))); },
-    visibleColumnCount(){
-      let count = 1; // actions
-      if(this.visibleColumns.vendor) count += 1;
-      if(this.visibleColumns.license) count += 1;
-      if(this.visibleColumns.organization) count += 1;
-      if(this.visibleColumns.category) count += 1;
-      if(this.visibleColumns.phone) count += 1;
-      if(this.visibleColumns.crm) count += 1;
-      return count;
-    },
     toggleSortDir(){
       this.sortDir = this.sortDir === "asc" ? "desc" : "asc";
       this.apply();
@@ -159,6 +172,16 @@ function vendorsApp(){
     debounceApply(){
       if(this.searchTimer) clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => this.apply(), 180);
+    },
+    summaryLine(){
+      if(this.loading && !this.rows.length) return "Loading vendors...";
+      if(!this.total) return "0 vendors";
+      const end = this.rows.length;
+      return `${this.total.toLocaleString()} vendors • Showing 1–${end}`;
+    },
+    footerLine(){
+      if(!this.total) return "Showing 0 records";
+      return `Showing ${this.rows.length} of ${this.total.toLocaleString()}`;
     },
     sortRows(items){
       const key = this.sortBy || "vendor";
@@ -216,9 +239,6 @@ function vendorsApp(){
       }
     },
     apply(){
-      if(!this.visibleColumns.vendor && !this.visibleColumns.license && !this.visibleColumns.organization && !this.visibleColumns.category && !this.visibleColumns.phone && !this.visibleColumns.crm){
-        this.visibleColumns.vendor = true;
-      }
       this.load(true);
     },
     loadMore(){
@@ -229,20 +249,22 @@ function vendorsApp(){
     reset(){
       this.search="";
       this.filters={organization:"",category:"",state:"",city:"",license:"",crmStage:""};
-      this.load(true);
+      this.apply();
     },
     async quickAdd(action, r){
       await addVendorFromDrawer(action, r.id, r.vendor || "", r.organization || r.license_label || "");
     },
+    closeDrawer(){
+      this.drawerOpen = false;
+    },
     async openDrawer(vendorId){
-      const drawer = document.getElementById("vendorDrawer");
-      if(!drawer) return;
+      this.drawerOpen = true;
       if(this.drawerController){
-        try{ this.drawerController.abort(); }catch(_){}
+        try{ this.drawerController.abort(); }catch(_){ }
       }
       const controller = new AbortController();
       this.drawerController = controller;
-      drawer.innerHTML = `
+      this.drawerHtml = `
         <div class="animate-pulse space-y-2">
           <div class="h-4 w-40 rounded bg-slate-200"></div>
           <div class="h-20 rounded-xl bg-slate-100"></div>
@@ -251,10 +273,10 @@ function vendorsApp(){
       `;
       try{
         const out = await fetch(`/ui/vendor-drawer?vendor_id=${encodeURIComponent(vendorId)}`, {signal: controller.signal});
-        drawer.innerHTML = await out.text();
+        this.drawerHtml = await out.text();
       }catch(err){
         if(err && err.name === "AbortError") return;
-        drawer.innerHTML = `<div class="text-sm text-rose-700">Could not load vendor details.</div>`;
+        this.drawerHtml = `<div class="text-sm text-rose-700">Could not load vendor details.</div>`;
       }finally{
         if(this.drawerController === controller){
           this.drawerController = null;
@@ -288,15 +310,8 @@ async function addVendorFromDrawer(action, vendorId, vendorName, organization){
   if(window.__vendorsApp && typeof window.__vendorsApp.load === "function"){
     await window.__vendorsApp.load();
   }
-  try{
-    localStorage.setItem("mDashboardRefreshAt", String(Date.now()));
-  }catch(_){}
+  try{ localStorage.setItem("mDashboardRefreshAt", String(Date.now())); }catch(_){ }
 }
 </script>
 {% endblock %}
-
-{% block context_panel %}
-<aside id="vendorDrawer" class="panel p-4 h-fit">
-  <div class="text-sm text-slate-500">Select a vendor to open contextual details.</div>
-</aside>
-{% endblock %}
+{% block context_panel %}{% endblock %}

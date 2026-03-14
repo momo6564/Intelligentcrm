@@ -126,6 +126,14 @@
       </label>
     </div>
     <button class="btn" type="submit">Create Workspace</button>
+    {% if google_enabled %}
+    <div class="subtitle" style="margin-top:6px;">
+      Or create with Google:
+      <div style="margin-top:8px;">
+        <a href="/google/login" class="btn" style="display:inline-block;text-align:center;width:100%;text-decoration:none;">Sign up with Google</a>
+      </div>
+    </div>
+    {% endif %}
     <div class="subtitle">Already have an account? <a href="/login">Login</a></div>
   </form>
 </body>

@@ -1,109 +1,143 @@
 {% extends "layouts/app_shell.html" %}
 {% block title %}Education Institutions{% endblock %}
 {% block page_title %}Education Institutions{% endblock %}
-{% block page_subtitle %}Filter and explore accredited schools and locations{% endblock %}
+{% block page_subtitle %}Search, filter, and open institution profiles{% endblock %}
+{% block main_grid %}xl:grid-cols-1{% endblock %}
 {% block content %}
+<style>[x-cloak]{display:none!important;}</style>
 <div x-data="institutionsApp()" x-init="load()" class="space-y-4">
-  <div class="grid xl:grid-cols-[320px_1fr] gap-4">
-    <div class="panel p-4 space-y-3 xl:sticky xl:top-4 h-fit">
-      <h3 class="font-semibold">Filters</h3>
-      <input x-model="search" @input="debounceApply()" placeholder="Search name, parent, city, state, phone" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-      <select x-model="filters.locationType" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All location types</option>
-        <template x-for="v in options.locationTypes"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.parent" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All parent institutions</option>
-        <template x-for="v in options.parents"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.state" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All states</option>
-        <template x-for="v in options.states"><option :value="v" x-text="v"></option></template>
-      </select>
-      <select x-model="filters.city" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All cities</option>
-        <template x-for="v in options.cities"><option :value="v" x-text="v"></option></template>
-      </select>
-      <button @click="reset()" class="w-full btn-ghost">Reset Filters</button>
-    </div>
-
-    <div class="panel overflow-hidden">
-      <div class="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center gap-2 justify-between text-sm">
-        <span class="font-medium" x-text="loading ? 'Loading institutions...' : `${rows.length} of ${total} institutions`"></span>
-        <div class="flex flex-wrap items-center gap-2">
-          <select x-model="sortBy" @change="apply()" class="rounded-lg border border-slate-300 px-2 py-1 text-xs">
-            <option value="location_name">Sort: Name</option>
-            <option value="location_type">Sort: Type</option>
-            <option value="parent_name">Sort: Parent</option>
-            <option value="state">Sort: State</option>
-            <option value="city">Sort: City</option>
-          </select>
-          <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="toggleSortDir()" x-text="sortDir==='asc' ? 'Asc' : 'Desc'"></button>
-          <div class="relative">
-            <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="showColumnMenu = !showColumnMenu">Columns</button>
-            <div x-show="showColumnMenu" @click.outside="showColumnMenu=false" class="absolute right-0 mt-2 z-20 w-56 rounded-xl border border-slate-200 bg-white shadow p-2 space-y-1 text-xs">
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.name"> Name</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.type"> Type</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.parent"> Parent</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.city"> City</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.state"> State</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.phone"> Phone</label>
-              <label class="flex items-center gap-2"><input type="checkbox" x-model="visibleColumns.email"> Admin Email</label>
-            </div>
-          </div>
-        </div>
+  <div class="panel p-4 space-y-3">
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="flex-1 min-w-[220px]">
+        <input x-model="search" @input="debounceApply()" placeholder="Search universities, cities, or states..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
       </div>
-      <div class="overflow-y-auto overflow-x-hidden max-h-[68vh]">
-        <table class="w-full text-sm table-fixed">
-          <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
-            <tr>
-              <th x-show="visibleColumns.name" class="text-left px-3 py-2">Name</th>
-              <th x-show="visibleColumns.type" class="text-left px-3 py-2">Type</th>
-              <th x-show="visibleColumns.parent" class="text-left px-3 py-2">Parent</th>
-              <th x-show="visibleColumns.city" class="text-left px-3 py-2">City</th>
-              <th x-show="visibleColumns.state" class="text-left px-3 py-2">State</th>
-              <th x-show="visibleColumns.phone" class="text-left px-3 py-2">Phone</th>
-              <th x-show="visibleColumns.email" class="text-left px-3 py-2">Admin Email</th>
-              <th class="text-left px-3 py-2">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr x-show="loading">
-              <td :colspan="visibleColumnCount()" class="px-3 py-4">
-                <div class="animate-pulse space-y-2">
-                  <div class="h-3 w-2/3 rounded bg-slate-200"></div>
-                  <div class="h-3 w-1/2 rounded bg-slate-200"></div>
-                  <div class="h-3 w-3/4 rounded bg-slate-200"></div>
+      <select x-model="filters.state" @change="apply()" class="min-w-[160px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All states</option>
+        <template x-for="v in options.states" :key="v"><option :value="v" x-text="v"></option></template>
+      </select>
+      <select x-model="filters.institution_level" @change="apply()" class="min-w-[170px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All levels</option>
+        <template x-for="v in options.levels" :key="v"><option :value="v" x-text="formatLevel(v)"></option></template>
+      </select>
+      <select x-model="filters.control" @change="apply()" class="min-w-[190px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All control types</option>
+        <template x-for="v in options.controls" :key="v"><option :value="v" x-text="shortControl(v)"></option></template>
+      </select>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="applySmartDefaults()">Smart Defaults</button>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="showAdvanced = true">More Filters</button>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="reset()">Reset</button>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+      <span x-text="summaryLine()"></span>
+      <span class="text-[11px]" x-show="filters.institution_level || filters.degree_granting_status">Defaults: 4-year + Degree-granting</span>
+    </div>
+  </div>
+
+  <div class="panel overflow-hidden">
+    <div class="overflow-y-auto overflow-x-hidden max-h-[70vh]">
+      <table class="w-full text-sm table-fixed">
+        <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
+          <tr>
+            <th class="text-left px-3 py-2 w-[38%]">Name</th>
+            <th class="text-left px-3 py-2">City</th>
+            <th class="text-left px-3 py-2 w-[80px]">State</th>
+            <th class="text-left px-3 py-2">Type</th>
+            <th class="text-left px-3 py-2">Control</th>
+            <th class="text-left px-3 py-2 w-[140px]">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr x-show="loading">
+            <td colspan="6" class="px-3 py-4">
+              <div class="animate-pulse space-y-2">
+                <div class="h-3 w-2/3 rounded bg-slate-200"></div>
+                <div class="h-3 w-1/2 rounded bg-slate-200"></div>
+                <div class="h-3 w-3/4 rounded bg-slate-200"></div>
+              </div>
+            </td>
+          </tr>
+          <template x-for="r in rows" :key="r.id">
+            <tr class="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer" @click="openDrawer(r.id)">
+              <td class="px-3 py-3">
+                <div class="font-semibold text-slate-800 truncate" x-text="r.location_name || '-'"></div>
+                <div class="text-xs text-slate-500 truncate" x-show="r.alias" x-text="`Alias: ${r.alias}`"></div>
+                <div class="flex flex-wrap gap-1 mt-1">
+                  <span x-show="r.control" class="rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[11px] font-semibold" x-text="shortControl(r.control)"></span>
+                  <span x-show="r.institution_level" class="rounded-full bg-amber-50 text-amber-700 px-2 py-0.5 text-[11px] font-semibold" x-text="formatLevel(r.institution_level)"></span>
+                  <span x-show="r.highest_offering" class="rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-semibold" x-text="shortOffering(r.highest_offering)"></span>
+                </div>
+              </td>
+              <td class="px-3 py-2 truncate" x-text="r.city || '-'"></td>
+              <td class="px-3 py-2" x-text="r.state || '-'"></td>
+              <td class="px-3 py-2 truncate" x-text="formatLevel(r.institution_level) || r.location_type || '-'"></td>
+              <td class="px-3 py-2 truncate" x-text="shortControl(r.control) || '-'"></td>
+              <td class="px-3 py-2">
+                <div class="flex items-center gap-1" @click.stop>
+                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/institutions/detail?institution_id=${encodeURIComponent(r.id)}`">Details</a>
+                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/institutions/detail?institution_id=${encodeURIComponent(r.id)}`">Chapters</a>
+                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="researchUrl(r)" target="_blank" rel="noopener">Research</a>
                 </div>
               </td>
             </tr>
-            <template x-for="r in rows" :key="r.id">
-              <tr class="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer"
-                  @click="openDrawer(r.id)">
-                <td x-show="visibleColumns.name" class="px-3 py-2 truncate" x-text="r.location_name || '-'"></td>
-                <td x-show="visibleColumns.type" class="px-3 py-2 truncate" x-text="r.location_type || '-'"></td>
-                <td x-show="visibleColumns.parent" class="px-3 py-2 truncate" x-text="r.parent_name || '-'"></td>
-                <td x-show="visibleColumns.city" class="px-3 py-2 truncate" x-text="r.city || '-'"></td>
-                <td x-show="visibleColumns.state" class="px-3 py-2 truncate" x-text="r.state || '-'"></td>
-                <td x-show="visibleColumns.phone" class="px-3 py-2 truncate" x-text="r.general_phone || '-'"></td>
-                <td x-show="visibleColumns.email" class="px-3 py-2 truncate" x-text="r.admin_email || '-'"></td>
-                <td class="px-3 py-2">
-                  <div class="flex items-center gap-1" @click.stop>
-                    <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/institutions/detail?institution_id=${encodeURIComponent(r.id)}`">Details</a>
-                  </div>
-                </td>
-              </tr>
-            </template>
-            <tr x-show="!loading && rows.length===0">
-              <td :colspan="visibleColumnCount()" class="px-3 py-8 text-center text-slate-500">No institutions match your filters.</td>
-            </tr>
-          </tbody>
-        </table>
+          </template>
+          <tr x-show="!loading && rows.length===0">
+            <td colspan="6" class="px-3 py-8 text-center text-slate-500">No institutions match your filters.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
+      <span class="text-slate-500" x-text="footerLine()"></span>
+      <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
+    </div>
+  </div>
+
+  <div x-show="showAdvanced" x-cloak class="fixed inset-0 z-30">
+    <div class="absolute inset-0 bg-slate-900/20" @click="showAdvanced=false"></div>
+    <div class="absolute right-4 top-24 w-full max-w-md panel p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="text-sm font-semibold">Advanced Filters</div>
+        <button class="btn-ghost px-2 py-1 text-xs" @click="showAdvanced=false">Close</button>
       </div>
-      <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
-        <span class="text-slate-500" x-text="`Showing ${rows.length} records`"></span>
-        <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
+      <div class="grid gap-2">
+        <select x-model="filters.highest_offering" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="">All highest offerings</option>
+          <template x-for="v in options.highestOfferings" :key="v"><option :value="v" x-text="v"></option></template>
+        </select>
+        <select x-model="filters.locale" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="">All locales</option>
+          <template x-for="v in options.locales" :key="v"><option :value="v" x-text="v"></option></template>
+        </select>
+        <select x-model="filters.degree_granting_status" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="">All degree-granting statuses</option>
+          <template x-for="v in options.degreeStatuses" :key="v"><option :value="v" x-text="v"></option></template>
+        </select>
+        <div>
+          <div class="text-[11px] text-slate-500">Student size (total)</div>
+          <div class="grid grid-cols-2 gap-2 mt-1">
+            <input type="number" min="0" x-model="filters.students_min" @input="debounceApply()" placeholder="Min students" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+            <input type="number" min="0" x-model="filters.students_max" @input="debounceApply()" placeholder="Max students" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          </div>
+        </div>
       </div>
+      <div class="text-[11px] text-slate-500">Student size ranges are based on the IPEDS EFTOTLT total.</div>
+    </div>
+  </div>
+
+  <div x-show="drawerOpen" x-cloak class="fixed inset-0 z-40">
+    <div class="absolute inset-0 bg-slate-900/20" @click="closeDrawer()"></div>
+    <div class="absolute right-0 top-0 h-full w-full max-w-[420px] panel rounded-none rounded-l-2xl p-4 overflow-y-auto"
+         x-transition:enter="transition transform duration-200"
+         x-transition:enter-start="translate-x-full"
+         x-transition:enter-end="translate-x-0"
+         x-transition:leave="transition transform duration-150"
+         x-transition:leave-start="translate-x-0"
+         x-transition:leave-end="translate-x-full">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-xs uppercase tracking-wide text-slate-500">Institution details</div>
+        <button class="btn-ghost px-2 py-1 text-xs" @click="closeDrawer()">Close</button>
+      </div>
+      <div x-html="drawerHtml"></div>
     </div>
   </div>
 </div>
@@ -113,40 +147,63 @@ function institutionsApp(){
   return {
     rows:[], search:"", total:0, pageSize:50, page:1,
     loading:false, searchTimer:null, drawerController:null,
-    sortBy:"location_name", sortDir:"asc", showColumnMenu:false,
-    visibleColumns:{name:true, type:true, parent:true, city:true, state:true, phone:true, email:true},
-    filters:{locationType:"", parent:"", state:"", city:""},
-    options:{locationTypes:[],parents:[],states:[],cities:[]},
-    uniq(values){ return [...new Set(values.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b))); },
-    visibleColumnCount(){
-      let count = 1; // actions
-      if(this.visibleColumns.name) count += 1;
-      if(this.visibleColumns.type) count += 1;
-      if(this.visibleColumns.parent) count += 1;
-      if(this.visibleColumns.city) count += 1;
-      if(this.visibleColumns.state) count += 1;
-      if(this.visibleColumns.phone) count += 1;
-      if(this.visibleColumns.email) count += 1;
-      return count;
+    drawerOpen:false, drawerHtml:"", showAdvanced:false, optionsLoaded:false, autoRelaxed:false, totalAll:0,
+    filters:{
+      state:"",
+      institution_level:"",
+      control:"",
+      highest_offering:"",
+      locale:"",
+      degree_granting_status:"",
+      students_min:"",
+      students_max:""
     },
-    toggleSortDir(){
-      this.sortDir = this.sortDir === "asc" ? "desc" : "asc";
-      this.apply();
-    },
+    options:{states:[], levels:[], controls:[], highestOfferings:[], locales:[], degreeStatuses:[]},
     debounceApply(){
       if(this.searchTimer) clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => this.apply(), 180);
     },
-    sortRows(items){
-      const key = this.sortBy || "location_name";
-      const dir = this.sortDir === "desc" ? -1 : 1;
-      return [...items].sort((a,b)=>{
-        const av = String(a[key] || "").toLowerCase();
-        const bv = String(b[key] || "").toLowerCase();
-        if(av < bv) return -1 * dir;
-        if(av > bv) return 1 * dir;
-        return 0;
-      });
+    formatLevel(value){
+      const v = (value || "").toLowerCase();
+      if(!v) return "";
+      if(v === "4 year") return "4-Year";
+      if(v === "2 year") return "2-Year";
+      if(v === "less than 2 year") return "<2-Year";
+      return value;
+    },
+    shortControl(value){
+      const v = (value || "").toLowerCase();
+      if(!v) return "";
+      if(v.startsWith("public")) return "Public";
+      if(v.includes("for-profit")) return "Private (For-profit)";
+      if(v.includes("not-for-profit")) return "Private (Nonprofit)";
+      return value;
+    },
+    shortOffering(value){
+      if(!value) return "";
+      const trimmed = String(value);
+      if(trimmed.length > 28){
+        return trimmed.split(" (")[0];
+      }
+      return trimmed;
+    },
+    researchUrl(row){
+      const name = row && row.location_name ? row.location_name : "";
+      const base = `${name} vendor list approved vendors procurement site:.edu`;
+      return `https://www.google.com/search?q=${encodeURIComponent(base)}`;
+    },
+    summaryLine(){
+      if(this.loading && !this.rows.length) return "Loading institutions...";
+      if(!this.total) return "0 institutions";
+      const end = this.rows.length;
+      if(this.totalAll && this.totalAll !== this.total){
+        return `${this.total.toLocaleString()} institutions • Showing 1–${end} (filtered from ${this.totalAll.toLocaleString()})`;
+      }
+      return `${this.total.toLocaleString()} institutions • Showing 1–${end}`;
+    },
+    footerLine(){
+      if(!this.total) return "Showing 0 records";
+      return `Showing ${this.rows.length} of ${this.total.toLocaleString()}`;
     },
     async load(resetPage=true){
       if(resetPage){
@@ -159,11 +216,18 @@ function institutionsApp(){
           page: String(this.page),
           limit: String(this.pageSize),
           q: this.search || "",
-          location_type: this.filters.locationType || "",
-          parent_name: this.filters.parent || "",
           state: this.filters.state || "",
-          city: this.filters.city || ""
+          institution_level: this.filters.institution_level || "",
+          control: this.filters.control || "",
+          highest_offering: this.filters.highest_offering || "",
+          locale: this.filters.locale || "",
+          degree_granting_status: this.filters.degree_granting_status || "",
+          students_min: this.filters.students_min || "",
+          students_max: this.filters.students_max || ""
         });
+        if(!this.optionsLoaded){
+          params.set("include_filters", "1");
+        }
         const out = await fetch(`/api/institutions?${params.toString()}`).then(r=>r.json());
         if(!out.ok){ this.rows=[]; this.total=0; return; }
         const incoming = out.results || [];
@@ -173,11 +237,24 @@ function institutionsApp(){
         }else{
           this.rows = [...this.rows, ...incoming];
         }
-        this.options.locationTypes = this.uniq(this.rows.map(r=>r.location_type));
-        this.options.parents = this.uniq(this.rows.map(r=>r.parent_name));
-        this.options.states = this.uniq(this.rows.map(r=>r.state));
-        this.options.cities = this.uniq(this.rows.map(r=>r.city));
-        this.rows = this.sortRows(this.rows);
+        if(this.page === 1 && this.total === 0 && !this.autoRelaxed && (this.filters.institution_level || this.filters.degree_granting_status)){
+          this.autoRelaxed = true;
+          this.filters.institution_level = "";
+          this.filters.degree_granting_status = "";
+          (window.appToast || alert)("No results with default filters. Showing all institutions.", "info");
+          this.loading = false;
+          return this.load(true);
+        }
+        if(out.filters && !this.optionsLoaded){
+          this.options.states = out.filters.states || [];
+          this.options.levels = out.filters.institution_levels || [];
+          this.options.controls = out.filters.controls || [];
+          this.options.highestOfferings = out.filters.highest_offerings || [];
+          this.options.locales = out.filters.locales || [];
+          this.options.degreeStatuses = out.filters.degree_statuses || [];
+          this.totalAll = Number(out.total_all || 0) || this.total;
+          this.optionsLoaded = true;
+        }
       }catch(_err){
         this.rows = [];
         this.total = 0;
@@ -188,9 +265,6 @@ function institutionsApp(){
       }
     },
     apply(){
-      if(!this.visibleColumns.name && !this.visibleColumns.type && !this.visibleColumns.parent && !this.visibleColumns.city && !this.visibleColumns.state && !this.visibleColumns.phone && !this.visibleColumns.email){
-        this.visibleColumns.name = true;
-      }
       this.load(true);
     },
     loadMore(){
@@ -200,18 +274,35 @@ function institutionsApp(){
     },
     reset(){
       this.search="";
-      this.filters={locationType:"", parent:"", state:"", city:""};
-      this.load(true);
+      this.filters = {
+        state:"",
+        institution_level:"",
+        control:"",
+        highest_offering:"",
+        locale:"",
+        degree_granting_status:"",
+        students_min:"",
+        students_max:""
+      };
+      this.autoRelaxed = false;
+      this.apply();
+    },
+    applySmartDefaults(){
+      this.filters.institution_level = "4 year";
+      this.filters.degree_granting_status = "Degree-granting";
+      this.apply();
+    },
+    closeDrawer(){
+      this.drawerOpen = false;
     },
     async openDrawer(institutionId){
-      const drawer = document.getElementById("institutionDrawer");
-      if(!drawer) return;
+      this.drawerOpen = true;
       if(this.drawerController){
         try{ this.drawerController.abort(); }catch(_){}
       }
       const controller = new AbortController();
       this.drawerController = controller;
-      drawer.innerHTML = `
+      this.drawerHtml = `
         <div class="animate-pulse space-y-2">
           <div class="h-4 w-40 rounded bg-slate-200"></div>
           <div class="h-20 rounded-xl bg-slate-100"></div>
@@ -220,10 +311,10 @@ function institutionsApp(){
       `;
       try{
         const out = await fetch(`/ui/institution-drawer?institution_id=${encodeURIComponent(institutionId)}`, {signal: controller.signal});
-        drawer.innerHTML = await out.text();
+        this.drawerHtml = await out.text();
       }catch(err){
         if(err && err.name === "AbortError") return;
-        drawer.innerHTML = `<div class="text-sm text-rose-700">Could not load institution details.</div>`;
+        this.drawerHtml = `<div class="text-sm text-rose-700">Could not load institution details.</div>`;
       }finally{
         if(this.drawerController === controller){
           this.drawerController = null;
@@ -234,9 +325,4 @@ function institutionsApp(){
 }
 </script>
 {% endblock %}
-
-{% block context_panel %}
-<aside id="institutionDrawer" class="panel p-4 h-fit">
-  <div class="text-sm text-slate-500">Select an institution to open contextual details.</div>
-</aside>
-{% endblock %}
+{% block context_panel %}{% endblock %}
