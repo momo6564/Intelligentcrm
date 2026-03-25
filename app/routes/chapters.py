@@ -1,7 +1,7 @@
 from flask import Blueprint, request, render_template
 from urllib.parse import quote_plus
 from ..auth import login_required, get_session_user
-from ..database import get_connection, ensure_crm_tables
+from ..database import get_connection, ensure_crm_tables, ensure_chapters_table, ensure_institutions_table
 from ..services.chapters import chapter_detail_bundle
 from ..utils.text_utils import clean_text
 from ..utils.workspace import workspace_id_for_user
@@ -40,6 +40,8 @@ def chapter_detail_page(chapter_id: str):
     chapter_id_clean = clean_text(chapter.get("id"))
     conn = get_connection()
     ensure_crm_tables(conn)
+    ensure_chapters_table(conn)
+    ensure_institutions_table(conn)
     crm_row = conn.execute(
         """
         SELECT id, status, notes, follow_up_date, priority, value_estimate, expected_close_date
@@ -97,26 +99,89 @@ def chapter_detail_page(chapter_id: str):
         status = crm_map.get(rid, "")
         if rid in served_set or status == "closed":
             row["crm_status"] = "served"
+            row["in_crm"] = True
         elif status:
-            row["crm_status"] = "prospect"
+            row["crm_status"] = status
+            row["in_crm"] = True
         else:
             row["crm_status"] = ""
+            row["in_crm"] = False
     for row in bundle.get("same_state", []):
         rid = clean_text(row.get("id"))
         status = crm_map.get(rid, "")
         if rid in served_set or status == "closed":
             row["crm_status"] = "served"
+            row["in_crm"] = True
         elif status:
-            row["crm_status"] = "prospect"
+            row["crm_status"] = status
+            row["in_crm"] = True
         else:
             row["crm_status"] = ""
+            row["in_crm"] = False
 
     chapter_name = clean_text(chapter.get("chapterName"))
     org_name = clean_text(chapter.get("orgName"))
     school = clean_text(chapter.get("school"))
+
+    chapter_instagram = ""
+    chapter_instagram_url = ""
+    chapter_instagram_label = ""
+    chapter_website = ""
+    president_name = ""
+    president_instagram_url = ""
+    president_instagram_label = ""
+
+    chapter_row = conn.execute(
+        "SELECT instagram, institution_id FROM chapters WHERE chapter_uid=?",
+        (chapter_id_clean,),
+    ).fetchone()
+    if chapter_row:
+        chapter_instagram = clean_text(chapter_row["instagram"])
+        inst_id = chapter_row["institution_id"]
+        if inst_id is not None:
+            inst = conn.execute("SELECT website, location_name FROM institutions WHERE id=?", (int(inst_id),)).fetchone()
+            if inst:
+                chapter_website = clean_text(inst["website"])
+        if not chapter_website and school:
+            inst = conn.execute("SELECT website FROM institutions WHERE location_name=? LIMIT 1", (school,)).fetchone()
+            if inst:
+                chapter_website = clean_text(inst["website"])
+
+    if chapter_instagram:
+        handle = chapter_instagram.lstrip("@") if not chapter_instagram.lower().startswith("http") else chapter_instagram
+        if handle and not handle.lower().startswith("http"):
+            chapter_instagram_url = f"https://instagram.com/{handle}"
+            chapter_instagram_label = f"@{handle}"
+        else:
+            chapter_instagram_url = chapter_instagram
+            chapter_instagram_label = chapter_instagram
+
+    president_row = conn.execute(
+        """
+        SELECT contact_name, instagram
+        FROM chapter_contacts
+        WHERE chapter_id=? AND workspace_id=? AND lower(coalesce(role,'')) LIKE '%president%'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (chapter_id_clean, workspace_id),
+    ).fetchone()
+    if president_row:
+        president_name = clean_text(president_row["contact_name"])
+        president_instagram = clean_text(president_row["instagram"])
+        if president_instagram:
+            handle = president_instagram.lstrip("@") if not president_instagram.lower().startswith("http") else president_instagram
+            if handle and not handle.lower().startswith("http"):
+                president_instagram_url = f"https://instagram.com/{handle}"
+                president_instagram_label = f"@{handle}"
+            else:
+                president_instagram_url = president_instagram
+                president_instagram_label = president_instagram
+
     research_query = (
-        f'Who is president of "{chapter_name}" of "{org_name}" and what is their official Instagram handle? '
-        f'the chapter is at "{school}" Return president full name advisor full name and Instagram usernames.'
+        f'Find the official website and Instagram for "{chapter_name}" of "{org_name}" at "{school}". '
+        "Also find the chapter president name and their Instagram handle. "
+        "Return direct links to the chapter website and the Instagram profiles (chapter and president)."
     )
     research_url = f"https://www.google.com/search?q={quote_plus(research_query)}"
     return render_app(
@@ -128,6 +193,12 @@ def chapter_detail_page(chapter_id: str):
         crm_contact=crm_contact,
         research_url=research_url,
         research_query=research_query,
+        chapter_instagram_url=chapter_instagram_url,
+        chapter_instagram_label=chapter_instagram_label,
+        chapter_website=chapter_website,
+        president_name=president_name,
+        president_instagram_url=president_instagram_url,
+        president_instagram_label=president_instagram_label,
         error="",
     )
 

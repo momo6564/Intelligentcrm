@@ -33,6 +33,14 @@ def fetch_normalized_rows(force_refresh: bool = False) -> List[dict]:
         return []
 
     ensure_vendor_table(conn)
+    instagram_lookup = {}
+    chapters_info = conn.execute("PRAGMA table_info(chapters)").fetchall()
+    chapter_cols = {row[1] for row in chapters_info}
+    if chapters_info and "chapter_uid" in chapter_cols and "instagram" in chapter_cols:
+        rows = conn.execute(
+            "SELECT chapter_uid, instagram FROM chapters WHERE trim(coalesce(instagram,''))<>''"
+        ).fetchall()
+        instagram_lookup = {clean_text(r["chapter_uid"]): clean_text(r["instagram"]) for r in rows}
     vendor_exact_lookup, vendor_org_lookup = load_vendor_lookup(conn)
     served_rows = conn.execute("SELECT chapter_id, COUNT(*) AS c FROM vendor_orders GROUP BY chapter_id").fetchall()
     served_lookup = {clean_text(r["chapter_id"]): int(r["c"]) for r in served_rows}
@@ -91,9 +99,12 @@ def fetch_normalized_rows(force_refresh: bool = False) -> List[dict]:
 
         vendor_names = [m["vendor"] for m in matches if m.get("vendor")]
 
+        chapter_uid = f"{source_file}::{row_number}" if source_file or row_number else chapter_id or chapter_name
+        instagram = clean_text(r["instagram"]) if "instagram" in r.keys() else instagram_lookup.get(chapter_uid, "")
+
         out.append(
             {
-                "id": f"{source_file}::{row_number}",
+                "id": chapter_uid,
                 "orgCode": org_code,
                 "orgName": org_name,
                 "entityType": entity_type,
@@ -107,13 +118,14 @@ def fetch_normalized_rows(force_refresh: bool = False) -> List[dict]:
                 "state": state,
                 "status": status,
                 "notes": notes,
+                "instagram": instagram,
                 "sourceFile": source_file,
                 "rowNumber": row_number,
                 "vendorCount": len(matches),
                 "vendorNames": ", ".join(vendor_names[:5]),
                 "vendors": matches[:30],
-                "isServed": served_lookup.get(f"{source_file}::{row_number}", 0) > 0,
-                "servedCount": served_lookup.get(f"{source_file}::{row_number}", 0),
+                "isServed": served_lookup.get(chapter_uid, 0) > 0,
+                "servedCount": served_lookup.get(chapter_uid, 0),
             }
         )
 

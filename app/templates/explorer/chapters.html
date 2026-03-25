@@ -11,13 +11,15 @@
       <div class="flex-1 min-w-[220px]">
         <input x-model="search" @input="debounceApply()" placeholder="Search chapters, schools, cities, or organizations..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
       </div>
-      <select x-model="filters.organization" @change="apply()" class="min-w-[180px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All organizations</option>
-        <template x-for="v in options.orgs" :key="v"><option :value="v" x-text="v"></option></template>
-      </select>
       <select x-model="filters.state" @change="apply()" class="min-w-[120px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All states</option>
         <template x-for="v in options.states" :key="v"><option :value="v" x-text="v"></option></template>
+      </select>
+      <input x-model="filters.city" @input="debounceApply()" placeholder="City" class="min-w-[160px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <input x-model="filters.school" @input="debounceApply()" placeholder="School" class="min-w-[200px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <select x-model="filters.organization" @change="apply()" class="min-w-[200px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All orgs</option>
+        <template x-for="v in options.orgs" :key="v"><option :value="v" x-text="v"></option></template>
       </select>
       <select x-model="filters.crmStage" @change="apply()" class="min-w-[160px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All CRM stages</option>
@@ -28,7 +30,6 @@
         <option value="closed">Served</option>
         <option value="dormant">Dormant</option>
       </select>
-      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="showAdvanced = true">More Filters</button>
       <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="reset()">Reset</button>
     </div>
     <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
@@ -109,30 +110,6 @@
     </div>
   </div>
 
-  <div x-show="showAdvanced" x-cloak class="fixed inset-0 z-30">
-    <div class="absolute inset-0 bg-slate-900/20" @click="showAdvanced=false"></div>
-    <div class="absolute right-4 top-24 w-full max-w-md panel p-4 space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="text-sm font-semibold">Advanced Filters</div>
-        <button class="btn-ghost px-2 py-1 text-xs" @click="showAdvanced=false">Close</button>
-      </div>
-      <div class="grid gap-2">
-        <select x-model="filters.school" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-          <option value="">All schools</option>
-          <template x-for="v in options.schools" :key="v"><option :value="v" x-text="v"></option></template>
-        </select>
-        <select x-model="filters.city" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-          <option value="">All cities</option>
-          <template x-for="v in options.cities" :key="v"><option :value="v" x-text="v"></option></template>
-        </select>
-        <select x-model="filters.status" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-          <option value="">All statuses</option>
-          <template x-for="v in options.statuses" :key="v"><option :value="v" x-text="v"></option></template>
-        </select>
-      </div>
-    </div>
-  </div>
-
   <div x-show="drawerOpen" x-cloak class="fixed inset-0 z-40">
     <div class="absolute inset-0 bg-slate-900/20" @click="closeDrawer()"></div>
     <div class="absolute right-0 top-0 h-full w-full max-w-[420px] panel rounded-none rounded-l-2xl p-4 overflow-y-auto"
@@ -159,7 +136,26 @@ function chaptersApp(){
     drawerOpen:false, drawerHtml:"", showAdvanced:false,
     sortBy:"school", sortDir:"asc",
     filters:{organization:"",school:"",city:"",state:"",status:"",crmStage:""},
-    options:{orgs:[],schools:[],cities:[],states:[],statuses:[]},
+    options:{
+      orgs:[
+        "Alpha Kappa Alpha",
+        "Alpha Phi Alpha",
+        "Delta Sigma Theta",
+        "Iota Phi Theta",
+        "Kappa Alpha Psi",
+        "Omega Psi Phi",
+        "Phi Beta Sigma",
+        "Sigma Gamma Rho",
+        "Zeta Phi Beta"
+      ],
+      states:[
+        "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia",
+        "Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts",
+        "Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico",
+        "New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina",
+        "South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming","District of Columbia"
+      ]
+    },
     uniq(values){ return [...new Set(values.filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b))); },
     toggleSortDir(){
       this.sortDir = this.sortDir === "asc" ? "desc" : "asc";
@@ -216,11 +212,6 @@ function chaptersApp(){
         }else{
           this.rows = [...this.rows, ...incoming];
         }
-        this.options.orgs = this.uniq(this.rows.map(r=>r.organization));
-        this.options.schools = this.uniq(this.rows.map(r=>r.school));
-        this.options.cities = this.uniq(this.rows.map(r=>r.city));
-        this.options.states = this.uniq(this.rows.map(r=>r.state));
-        this.options.statuses = this.uniq(this.rows.map(r=>r.status));
         this.rows = this.sortRows(this.rows);
         if(this.filters.crmStage){
           this.rows = this.rows.filter(r => (r.crm_stage || "") === this.filters.crmStage);

@@ -35,7 +35,8 @@ def vendor_detail_page():
     if vendor_id_raw.isdigit():
         row = conn.execute(
             """
-            SELECT id, vendor, organization, category, state, city, website, email, phone, license_label, is_greek_licensed, is_collegiate
+            SELECT id, vendor, organization, category, state, city, website, email, phone, instagram_url,
+                   license_label, is_greek_licensed, is_collegiate
             FROM vendors
             WHERE id=?
             """,
@@ -44,7 +45,8 @@ def vendor_detail_page():
     if row is None and vendor_name:
         row = conn.execute(
             """
-            SELECT id, vendor, organization, category, state, city, website, email, phone, license_label, is_greek_licensed, is_collegiate
+            SELECT id, vendor, organization, category, state, city, website, email, phone, instagram_url,
+                   license_label, is_greek_licensed, is_collegiate
             FROM vendors
             WHERE lower(vendor)=lower(?)
             ORDER BY id ASC
@@ -65,12 +67,23 @@ def vendor_detail_page():
             "website": "",
             "email": "",
             "phone": "",
+            "instagram_url": "",
             "license_label": "",
             "is_greek_licensed": 0,
             "is_collegiate": 0,
         }
 
     lookup_name = clean_text(vendor.get("vendor")) or vendor_name
+    raw_instagram = clean_text(vendor.get("instagram_url"))
+    vendor_instagram_url = ""
+    vendor_instagram_label = ""
+    instagram_handle = raw_instagram.lstrip("@") if raw_instagram and not raw_instagram.lower().startswith("http") else raw_instagram
+    if instagram_handle and not instagram_handle.lower().startswith("http"):
+        vendor_instagram_url = f"https://instagram.com/{instagram_handle}"
+        vendor_instagram_label = f"@{instagram_handle}"
+    else:
+        vendor_instagram_url = raw_instagram
+        vendor_instagram_label = raw_instagram
     served_rows = []
     my_status = ""
     crm_contact = {}
@@ -161,6 +174,8 @@ def vendor_detail_page():
     return render_app(
         "explorer/vendor_detail.html",
         vendor=vendor,
+        vendor_instagram_url=vendor_instagram_url,
+        vendor_instagram_label=vendor_instagram_label,
         served_chapters=served_rows,
         my_status=my_status,
         crm_contact=crm_contact,
@@ -187,7 +202,8 @@ def vendor_drawer_partial():
     ensure_vendor_table(conn)
     row = conn.execute(
         """
-        SELECT id, vendor, organization, category, state, city, website, email, phone, license_label, is_greek_licensed, is_collegiate
+        SELECT id, vendor, organization, category, state, city, website, email, phone, instagram_url,
+               license_label, is_greek_licensed, is_collegiate
         FROM vendors
         WHERE id=?
         """,

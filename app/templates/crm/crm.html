@@ -1,4 +1,4 @@
-{% extends "layouts/app_shell.html" %}
+﻿{% extends "layouts/app_shell.html" %}
 {% block title %}CRM{% endblock %}
 {% block page_title %}CRM{% endblock %}
 {% block page_subtitle %}Track pipeline, tasks, and follow-ups{% endblock %}
@@ -49,7 +49,8 @@
       <input x-model="$store.crm.search" @input="$store.crm.queueApply()" placeholder="Search contacts..." class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
       <select x-model="$store.crm.filters.type" @change="$store.crm.apply()" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All Types</option>
-        <option value="chapter">Chapter</option>
+        <option value="organization">Organization</option>
+        <option value="school">School</option>
         <option value="vendor">Vendor</option>
       </select>
       <select x-model="$store.crm.filters.status" @change="$store.crm.apply()" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
@@ -81,7 +82,7 @@
           <template x-for="row in $store.crm.boardItems(stage)" :key="row.id">
             <button type="button" @click="$store.crm.select(row.id)" class="w-full text-left rounded-xl border border-slate-200 p-2 hover:bg-slate-50">
               <div class="text-sm font-medium" x-text="row.name || '-'"></div>
-              <div class="text-xs text-slate-500" x-text="`${row.type || '-'} | ${row.connection || '-'}`"></div>
+              <div class="text-xs text-slate-500" x-text="`${$store.crm.displayTypeLabel(row)} | ${row.connection || '-'}`"></div>
               <div class="mt-1 text-xs text-rose-700" x-show="row.is_overdue_follow_up">Follow-up overdue</div>
             </button>
           </template>
@@ -142,7 +143,7 @@
                        @change="$store.crm.toggleSelect(row.id, $event.target.checked)">
               </td>
               <td class="px-3 py-2 font-medium" x-text="row.name || '-'"></td>
-              <td class="px-3 py-2 capitalize" x-text="row.type || '-'"></td>
+              <td class="px-3 py-2 capitalize" x-text="$store.crm.displayTypeLabel(row)"></td>
               <td class="px-3 py-2">
                 <span class="inline-flex rounded-md px-2 py-0.5 text-xs capitalize" :class="$store.crm.statusBadgeClass(row.status)" x-text="$store.crm.stageLabel(row.status)"></span>
               </td>
@@ -221,10 +222,22 @@
         <div>
           <label class="text-xs text-slate-500 uppercase">Type</label>
           <select x-model="$store.crm.newContact.type" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+            <option value="organization">Organization</option>
+            <option value="school">School</option>
             <option value="vendor">Vendor</option>
-            <option value="chapter">Chapter</option>
-            <option value="other">Other</option>
           </select>
+        </div>
+        <div x-show="$store.crm.newContact.type==='vendor'">
+          <label class="text-xs text-slate-500 uppercase">Vendor ID</label>
+          <input x-model="$store.crm.newContact.vendor_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Vendor ID">
+        </div>
+        <div x-show="$store.crm.newContact.type==='organization'">
+          <label class="text-xs text-slate-500 uppercase">Chapter ID</label>
+          <input x-model="$store.crm.newContact.chapter_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Chapter ID">
+        </div>
+        <div x-show="$store.crm.newContact.type==='school'">
+          <label class="text-xs text-slate-500 uppercase">Institution ID</label>
+          <input x-model="$store.crm.newContact.institution_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Institution ID">
         </div>
         <div>
           <label class="text-xs text-slate-500 uppercase">Contact Source</label>
@@ -254,6 +267,10 @@
         <div>
           <label class="text-xs text-slate-500 uppercase">Follow-up</label>
           <input type="date" x-model="$store.crm.newContact.follow_up_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 uppercase">Last Contact</label>
+          <input type="date" x-model="$store.crm.newContact.last_contact_at" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
         </div>
         <div>
           <label class="text-xs text-slate-500 uppercase">Expected Close</label>
@@ -303,7 +320,7 @@
       <div>
         <div class="text-xs uppercase text-slate-500">Selected Contact</div>
         <h3 class="text-lg font-semibold" x-text="$store.crm.selected.name || '-'"></h3>
-        <div class="text-xs text-slate-500" x-text="`${$store.crm.selected.type || '-'} | ${$store.crm.selected.connection || '-'}`"></div>
+        <div class="text-xs text-slate-500" x-text="`${$store.crm.displayTypeLabel($store.crm.selected) || '-'} | ${$store.crm.selected.connection || '-'}`"></div>
         <div class="text-xs text-slate-500" x-text="`Last contact: ${$store.crm.selected.last_contact_at || '-'}`"></div>
         <a x-show="$store.crm.detailHref($store.crm.selected)" :href="$store.crm.detailHref($store.crm.selected)" class="text-sm text-blue-700 hover:underline">Open detail page</a>
       </div>
@@ -462,13 +479,37 @@ document.addEventListener("alpine:init", () => {
     newNote: "",
     newTask: {title:"", due_date:"", priority:"normal"},
     showNewContact: false,
-    newContact: {name:"", type:"vendor", connection:"", status:"prospect", notes:"", follow_up_date:"", expected_close_date:"", priority:"normal", value_estimate:"", contact_source:""},
+    newContact: {name:"", type:"organization", connection:"", status:"prospect", notes:"", follow_up_date:"", last_contact_at:"", expected_close_date:"", priority:"normal", value_estimate:"", contact_source:"", vendor_id:"", chapter_id:"", institution_id:""},
     outreach: {source:"", note:""},
     showStageEditor: false,
     stageDraft: {},
     stageLabel(status){
       const s = (status || "").toLowerCase();
       return this.stageTitles[s] || "Prospect";
+    },
+    displayType(row){
+      if(!row) return "";
+      const raw = (row.type || "").toLowerCase();
+      if(raw === "vendor") return "vendor";
+      if(raw === "school") return "school";
+      if(raw === "organization") return "organization";
+      if(raw === "chapter") return "organization";
+      if(raw === "other"){
+        const conn = (row.connection || "").toLowerCase();
+        if(conn.startsWith("institution:")) return "school";
+        return "organization";
+      }
+      return raw || "organization";
+    },
+    displayTypeLabel(row){
+      const t = this.displayType(row);
+      if(!t) return "-";
+      return t.charAt(0).toUpperCase() + t.slice(1);
+    },
+    extractInstitutionId(connection){
+      const text = String(connection || "");
+      const match = text.match(/institution\s*:\s*(\d+)/i);
+      return match ? match[1] : "";
     },
     statusBadgeClass(status){
       const s = (status || "").toLowerCase();
@@ -489,7 +530,7 @@ document.addEventListener("alpine:init", () => {
       return `${closed} closed / ${contacted} contacted`;
     },
     resetNewContact(){
-      this.newContact = {name:"", type:"vendor", connection:"", status:"prospect", notes:"", follow_up_date:"", expected_close_date:"", priority:"normal", value_estimate:"", contact_source:""};
+      this.newContact = {name:"", type:"organization", connection:"", status:"prospect", notes:"", follow_up_date:"", last_contact_at:"", expected_close_date:"", priority:"normal", value_estimate:"", contact_source:"", vendor_id:"", chapter_id:"", institution_id:""};
     },
     openNewContact(){
       this.resetNewContact();
@@ -559,7 +600,7 @@ document.addEventListener("alpine:init", () => {
     apply(){
       const q = (this.search || "").toLowerCase().trim();
       this.rows = this.all.filter((r)=>{
-        const type = (r.type || "").toLowerCase();
+        const type = this.displayType(r);
         const status = (r.status || "").toLowerCase();
         if(this.filters.type && type !== this.filters.type) return false;
         if(this.filters.status && status !== this.filters.status) return false;
@@ -573,7 +614,7 @@ document.addEventListener("alpine:init", () => {
       const source = (this.board.stages && this.board.stages[stage]) ? this.board.stages[stage] : [];
       const q = (this.search || "").toLowerCase().trim();
       return source.filter((r)=>{
-        const type = (r.type || "").toLowerCase();
+        const type = this.displayType(r);
         const status = (r.status || "").toLowerCase();
         if(this.filters.type && type !== this.filters.type) return false;
         if(this.filters.status && status !== this.filters.status) return false;
@@ -651,12 +692,17 @@ document.addEventListener("alpine:init", () => {
     },
     detailHref(row){
       if(!row) return "";
-      if((row.type || "").toLowerCase()==="chapter" && row.chapter_id){
+      const displayType = this.displayType(row);
+      if(displayType==="organization" && row.chapter_id){
         return `/chapters/${encodeURIComponent(row.chapter_id)}`;
       }
-      if((row.type || "").toLowerCase()==="vendor"){
+      if(displayType==="vendor"){
         if(row.vendor_id) return `/vendors/detail?vendor_id=${row.vendor_id}`;
         if(row.name) return `/vendors/detail?vendor_name=${encodeURIComponent(row.name)}`;
+      }
+      if(displayType==="school"){
+        const instId = this.extractInstitutionId(row.connection || "");
+        if(instId) return `/institutions/detail?institution_id=${instId}`;
       }
       return "";
     },
@@ -722,6 +768,23 @@ document.addEventListener("alpine:init", () => {
         return;
       }
       const payload = {...this.newContact};
+      const kind = (payload.type || "organization").toLowerCase();
+      if(kind === "organization"){
+        payload.type = "chapter";
+      }else if(kind === "school"){
+        payload.type = "school";
+        const instId = String(payload.institution_id || "").trim();
+        if(instId){
+          const suffix = payload.connection ? ` | ${payload.connection}` : "";
+          payload.connection = `institution:${instId}${suffix}`;
+        }
+      }else if(kind === "vendor"){
+        payload.type = "vendor";
+      }
+      if(!String(payload.vendor_id || "").trim()) delete payload.vendor_id;
+      if(!String(payload.chapter_id || "").trim()) delete payload.chapter_id;
+      if(!String(payload.institution_id || "").trim()) delete payload.institution_id;
+      if(!String(payload.last_contact_at || "").trim()) delete payload.last_contact_at;
       const out = await fetch("/api/m/crm/add-contact", {
         method: "POST",
         headers: {"Content-Type":"application/json"},

@@ -78,7 +78,7 @@ def institution_detail_page():
             """
             SELECT id, status
             FROM crm_contacts
-            WHERE workspace_id=? AND type='other' AND connection=?
+            WHERE workspace_id=? AND type IN ('school', 'other') AND connection=?
             ORDER BY id DESC
             LIMIT 1
             """,

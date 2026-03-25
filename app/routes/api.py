@@ -12,7 +12,7 @@ from ..config import Config
 from ..services.dashboard import manufacturer_dashboard_snapshot, manufacturer_dashboard_dataset
 from ..services.chapters import fetch_normalized_rows, get_chapter_by_id
 from ..services.vendors import vendor_competitors, build_vendor_hot_leads
-from ..utils.text_utils import clean_text, clean_date
+from ..utils.text_utils import clean_text, clean_date, norm_state
 from ..utils.email import send_email_best_effort
 from ..utils.workspace import workspace_id_for_user
 
@@ -1002,7 +1002,7 @@ def api_m_crm_add_institution():
     exists = conn.execute(
         """
         SELECT id FROM crm_contacts
-        WHERE type='other' AND connection=? AND workspace_id=?
+        WHERE type IN ('school', 'other') AND connection=? AND workspace_id=?
         """,
         (connection, workspace_id),
     ).fetchone()
@@ -1020,7 +1020,7 @@ def api_m_crm_add_institution():
     else:
         crm_cols = {row[1] for row in conn.execute("PRAGMA table_info(crm_contacts)").fetchall()}
         insert_cols = ["type", "name", "connection", "status", "workspace_id"]
-        insert_vals = ["other", institution_name, connection, status, workspace_id]
+        insert_vals = ["school", institution_name, connection, status, workspace_id]
         if "priority" in crm_cols:
             insert_cols.append("priority")
             insert_vals.append("normal")
@@ -1264,6 +1264,90 @@ def api_m_crm_update():
     conn.commit()
     return jsonify({"ok": True})
 
+@bp.route("/api/m/chapters/instagram", methods=["POST"])
+@login_required()
+def api_update_chapter_instagram():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    payload = request.get_json(silent=True) or {}
+    chapter_id = clean_text(payload.get("chapter_id"))
+    instagram_url = clean_text(payload.get("instagram_url"))
+    if not chapter_id:
+        return jsonify({"ok": False, "error": "chapter_id is required"}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    ensure_chapters_table(conn)
+
+    crm_row = conn.execute(
+        "SELECT 1 FROM crm_contacts WHERE workspace_id=? AND type='chapter' AND chapter_id=? LIMIT 1",
+        (workspace_id, chapter_id),
+    ).fetchone()
+    served_row = conn.execute(
+        "SELECT 1 FROM vendor_orders WHERE workspace_id=? AND chapter_id=? LIMIT 1",
+        (workspace_id, chapter_id),
+    ).fetchone()
+    if crm_row is None and served_row is None:
+        return jsonify({"ok": False, "error": "Add this chapter to your CRM before editing Instagram."}), 403
+
+    existing = conn.execute(
+        "SELECT id FROM chapters WHERE chapter_uid=? LIMIT 1",
+        (chapter_id,),
+    ).fetchone()
+    if existing is None:
+        return jsonify({"ok": False, "error": "Chapter not found."}), 404
+
+    conn.execute(
+        "UPDATE chapters SET instagram=? WHERE chapter_uid=?",
+        (instagram_url, chapter_id),
+    )
+    conn.commit()
+    return jsonify({"ok": True})
+
+@bp.route("/api/m/vendors/instagram", methods=["POST"])
+@login_required()
+def api_update_vendor_instagram():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    payload = request.get_json(silent=True) or {}
+    instagram_url = clean_text(payload.get("instagram_url"))
+    vendor_id_raw = clean_text(payload.get("vendor_id"))
+    vendor_name = clean_text(payload.get("vendor_name"))
+    vendor_id = int(vendor_id_raw) if vendor_id_raw.isdigit() else None
+    if vendor_id is None and not vendor_name:
+        return jsonify({"ok": False, "error": "vendor_id or vendor_name is required"}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    ensure_vendor_table(conn)
+
+    crm_row = None
+    if vendor_id is not None:
+        crm_row = conn.execute(
+            "SELECT 1 FROM crm_contacts WHERE workspace_id=? AND type='vendor' AND vendor_id=? LIMIT 1",
+            (workspace_id, vendor_id),
+        ).fetchone()
+    if crm_row is None and vendor_name:
+        crm_row = conn.execute(
+            "SELECT 1 FROM crm_contacts WHERE workspace_id=? AND type='vendor' AND lower(name)=lower(?) LIMIT 1",
+            (workspace_id, vendor_name),
+        ).fetchone()
+    served_row = None
+    if vendor_name:
+        served_row = conn.execute(
+            "SELECT 1 FROM vendor_orders WHERE workspace_id=? AND lower(vendor)=lower(?) LIMIT 1",
+            (workspace_id, vendor_name),
+        ).fetchone()
+    if crm_row is None and served_row is None:
+        return jsonify({"ok": False, "error": "Add this vendor to your CRM before editing Instagram."}), 403
+
+    if vendor_id is not None:
+        conn.execute("UPDATE vendors SET instagram_url=? WHERE id=?", (instagram_url, vendor_id))
+    else:
+        conn.execute("UPDATE vendors SET instagram_url=? WHERE lower(vendor)=lower(?)", (instagram_url, vendor_name))
+    conn.commit()
+    return jsonify({"ok": True})
+
 @bp.route("/api/m/crm/add-contact", methods=["POST"])
 @login_required()
 def api_m_crm_add_contact():
@@ -1272,12 +1356,13 @@ def api_m_crm_add_contact():
     payload = request.get_json(silent=True) or {}
     name = clean_text(payload.get("name"))
     contact_type = clean_text(payload.get("type")).lower() or "other"
-    if contact_type not in {"vendor", "chapter", "other"}:
+    if contact_type not in {"vendor", "chapter", "other", "school", "organization"}:
         contact_type = "other"
     connection = clean_text(payload.get("connection"))
     status = normalize_crm_status(payload.get("status"))
     notes = clean_text(payload.get("notes"))
     contact_source = clean_text(payload.get("contact_source"))
+    last_contact_at = clean_text(payload.get("last_contact_at"))
     follow_up_date = clean_date(payload.get("follow_up_date"))
     expected_close_date = clean_date(payload.get("expected_close_date"))
     priority = clean_text(payload.get("priority")).lower() or "normal"
@@ -1321,6 +1406,9 @@ def api_m_crm_add_contact():
     if "follow_up_date" in crm_cols:
         insert_cols.append("follow_up_date")
         insert_vals.append(follow_up_date)
+    if "last_contact_at" in crm_cols:
+        insert_cols.append("last_contact_at")
+        insert_vals.append(last_contact_at)
     if "expected_close_date" in crm_cols:
         insert_cols.append("expected_close_date")
         insert_vals.append(expected_close_date)
@@ -2146,8 +2234,13 @@ def api_chapters():
             where.append("organization = ?")
             params.append(org_filter)
         if state_filter:
-            where.append("state = ?")
-            params.append(state_filter)
+            state_norm = norm_state(state_filter) or state_filter
+            if state_norm != state_filter:
+                where.append("(state = ? OR state = ?)")
+                params.extend([state_filter, state_norm])
+            else:
+                where.append("state = ?")
+                params.append(state_filter)
         if city_filter:
             where.append("city = ?")
             params.append(city_filter)

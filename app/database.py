@@ -647,6 +647,7 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
             category TEXT,
             email TEXT,
             phone TEXT,
+            instagram_url TEXT,
             organization_norm TEXT,
             state_norm TEXT,
             license_label TEXT,
@@ -665,6 +666,8 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE vendors ADD COLUMN is_greek_licensed INTEGER DEFAULT 0")
     if "is_collegiate" not in vendor_columns:
         conn.execute("ALTER TABLE vendors ADD COLUMN is_collegiate INTEGER DEFAULT 0")
+    if "instagram_url" not in vendor_columns:
+        conn.execute("ALTER TABLE vendors ADD COLUMN instagram_url TEXT")
 
     greek_exists = os.path.exists(Config.VENDOR_CSV_PATH)
     collegiate_exists = os.path.exists(Config.COLLEGIATE_VENDOR_CSV_PATH)
@@ -730,6 +733,7 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
                         "category": category,
                         "email": email,
                         "phone": "",
+                        "instagram_url": "",
                         "organization_norm": norm_org(organization),
                         "state_norm": norm_state(state),
                         "vendor_norm": vendor_norm,
@@ -768,6 +772,7 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
                         "category": "",
                         "email": email,
                         "phone": phone,
+                        "instagram_url": "",
                         "organization_norm": "",
                         "state_norm": norm_state(state),
                         "vendor_norm": vendor_norm,
@@ -813,6 +818,7 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
                 rec.get("category"),
                 rec.get("email"),
                 rec.get("phone"),
+                rec.get("instagram_url"),
                 rec.get("organization_norm"),
                 rec.get("state_norm"),
                 license_label(greek_flag, collegiate_flag),
@@ -825,9 +831,9 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
         conn.executemany(
             """
             INSERT INTO vendors
-            (vendor, organization, registered_org_count, website, city, state, category, email, phone, organization_norm, state_norm,
+            (vendor, organization, registered_org_count, website, city, state, category, email, phone, instagram_url, organization_norm, state_norm,
              license_label, is_greek_licensed, is_collegiate)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             batch,
         )

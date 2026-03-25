@@ -32,6 +32,14 @@
         <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Phone</div><div>{{ vendor.phone or "-" }}</div></div>
         <div class="rounded-xl border border-slate-200 p-3"><div class="text-slate-500 text-xs uppercase">Email</div><div>{{ vendor.email or "-" }}</div></div>
         <div class="rounded-xl border border-slate-200 p-3 md:col-span-2">
+          <div class="text-slate-500 text-xs uppercase">Instagram</div>
+          <div>
+            {% if vendor_instagram_url %}
+              <a href="{{ vendor_instagram_url }}" target="_blank" rel="noopener" class="text-blue-700 hover:underline">{{ vendor_instagram_label }}</a>
+            {% else %}-{% endif %}
+          </div>
+        </div>
+        <div class="rounded-xl border border-slate-200 p-3 md:col-span-2">
           <div class="text-slate-500 text-xs uppercase">Licensed Organizations</div>
           <div>
             {% if licensed_orgs %}
@@ -63,6 +71,14 @@
         </div>
       </div>
       <div class="grid md:grid-cols-2 gap-2 text-sm">
+        <div class="md:col-span-2" x-show="canEditInstagram">
+          <label class="text-xs text-slate-500 uppercase">Instagram URL</label>
+          <div class="flex gap-2">
+            <input x-model="instagramUrl" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="https://instagram.com/..." />
+            <button type="button" class="btn-ghost px-3 py-2 text-xs" @click="saveInstagram()">Save</button>
+          </div>
+          <div class="text-xs text-slate-500 mt-1" x-show="!instagramUrl">Add the official Instagram once this vendor is in your CRM.</div>
+        </div>
         <div>
           <label class="text-xs text-slate-500 uppercase">Stage</label>
           <select x-model="form.status" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
@@ -160,6 +176,8 @@
 function vendorCrm(){
   return {
     contactId: {{ crm_contact.id|default(None)|tojson }},
+    canEditInstagram: {{ (my_status != "")|tojson }},
+    instagramUrl: {{ vendor_instagram_url|default("")|tojson }},
     form: {
       status: {{ (crm_contact.status or 'prospect')|tojson }},
       notes: {{ (crm_contact.notes or '')|tojson }},
@@ -171,6 +189,24 @@ function vendorCrm(){
     detail: {tasks: [], timeline: []},
     async init(){
       if(this.contactId){ await this.loadDetail(); }
+    },
+    async saveInstagram(){
+      if(!this.canEditInstagram){
+        (window.appToast || alert)("Add this vendor to your CRM first.", "error");
+        return;
+      }
+      const resp = await fetch("/api/m/vendors/instagram", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          vendor_id: {{ vendor.id|default(None)|tojson }},
+          vendor_name: {{ vendor.vendor|default('')|tojson }},
+          instagram_url: this.instagramUrl
+        })
+      });
+      const out = await resp.json();
+      if(!out.ok){ (window.appToast || alert)(out.error || "Failed to save Instagram", "error"); return; }
+      (window.appToast || alert)("Instagram updated.", "success");
     },
     async mark(action){
       const resp = await fetch("/crm/add-vendor", {
