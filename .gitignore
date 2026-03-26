@@ -25,6 +25,7 @@ greek_chapters.csv
 data/*.csv
 data/*.xlsx
 data/*.zip
+data/uploads/
 *.localbak-*
 
 # OS/editor noise

@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, date
 from flask import Blueprint, request, jsonify, redirect, url_for, Response
 from urllib.parse import quote
+from werkzeug.utils import secure_filename
 
 from ..auth import login_required, get_session_user
 from ..database import get_connection, ensure_crm_tables, ensure_vendor_table, ensure_institutions_table, ensure_chapters_table, log_activity, log_lead_activity
@@ -17,6 +18,17 @@ from ..utils.email import send_email_best_effort
 from ..utils.workspace import workspace_id_for_user
 
 bp = Blueprint('api', __name__)
+
+def _feedback_upload_dir() -> str:
+    base = Config.FEEDBACK_UPLOAD_DIR
+    os.makedirs(base, exist_ok=True)
+    return base
+
+def _safe_feedback_filename(name: str) -> str:
+    cleaned = secure_filename(clean_text(name)) or "upload"
+    ext = os.path.splitext(cleaned)[1].lower()
+    allowed = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    return cleaned if ext in allowed else ""
 
 def normalize_crm_status(value: str) -> str:
     raw = clean_text(value).lower().replace(" ", "_")
@@ -37,6 +49,53 @@ def action_to_status(value: str) -> str:
     if action in {"contacted", "follow_up", "negotiating", "dormant"}:
         return action
     return "prospect"
+
+
+@bp.route("/api/feedback", methods=["POST"])
+@login_required()
+def api_feedback_submit():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    message = clean_text(request.form.get("message"))
+    page_url = clean_text(request.form.get("page_url"))
+    page_title = clean_text(request.form.get("page_title"))
+    image = request.files.get("image")
+
+    image_path = ""
+    image_name = ""
+    if image and image.filename:
+        filename = _safe_feedback_filename(image.filename)
+        if not filename:
+            return jsonify({"ok": False, "error": "Unsupported image type"}), 400
+        ext = os.path.splitext(filename)[1].lower()
+        unique = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:10]}{ext}"
+        upload_dir = _feedback_upload_dir()
+        image.save(os.path.join(upload_dir, unique))
+        image_path = unique
+        image_name = filename
+
+    if not message and not image_path:
+        return jsonify({"ok": False, "error": "Message or image is required"}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    conn.execute(
+        """
+        INSERT INTO feedback_messages(user_id, workspace_id, page_url, page_title, message, image_path, image_name)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(user.get("id") or 0),
+            workspace_id,
+            page_url,
+            page_title,
+            message,
+            image_path,
+            image_name,
+        ),
+    )
+    conn.commit()
+    return jsonify({"ok": True})
 
 def default_stage_titles() -> dict:
     return {

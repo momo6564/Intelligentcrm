@@ -318,6 +318,21 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            workspace_id TEXT,
+            page_url TEXT,
+            page_title TEXT,
+            message TEXT,
+            image_path TEXT,
+            image_name TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
 
     vendor_order_columns = {row[1] for row in conn.execute("PRAGMA table_info(vendor_orders)").fetchall()}
     if "order_type" not in vendor_order_columns:
@@ -398,6 +413,21 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     lead_activities_columns = {row[1] for row in conn.execute("PRAGMA table_info(lead_activities)").fetchall()}
     if "workspace_id" not in lead_activities_columns:
         conn.execute("ALTER TABLE lead_activities ADD COLUMN workspace_id TEXT")
+    feedback_columns = {row[1] for row in conn.execute("PRAGMA table_info(feedback_messages)").fetchall()}
+    if "user_id" not in feedback_columns:
+        conn.execute("ALTER TABLE feedback_messages ADD COLUMN user_id INTEGER")
+    if "workspace_id" not in feedback_columns:
+        conn.execute("ALTER TABLE feedback_messages ADD COLUMN workspace_id TEXT")
+    if "page_url" not in feedback_columns:
+        conn.execute("ALTER TABLE feedback_messages ADD COLUMN page_url TEXT")
+    if "page_title" not in feedback_columns:
+        conn.execute("ALTER TABLE feedback_messages ADD COLUMN page_title TEXT")
+    if "message" not in feedback_columns:
+        conn.execute("ALTER TABLE feedback_messages ADD COLUMN message TEXT")
+    if "image_path" not in feedback_columns:
+        conn.execute("ALTER TABLE feedback_messages ADD COLUMN image_path TEXT")
+    if "image_name" not in feedback_columns:
+        conn.execute("ALTER TABLE feedback_messages ADD COLUMN image_name TEXT")
     if "manufacturer_id" not in lead_activities_columns:
         conn.execute("ALTER TABLE lead_activities ADD COLUMN manufacturer_id INTEGER")
     crm_notes_columns = {row[1] for row in conn.execute("PRAGMA table_info(crm_notes)").fetchall()}

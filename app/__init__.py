@@ -30,7 +30,7 @@ def create_app(config_class=None):
         )
 
     # Register blueprints (to be implemented)
-    from .routes import main, auth, api, chapters, vendors, institutions, team
+    from .routes import main, auth, api, chapters, vendors, institutions, team, admin
     app.register_blueprint(main.bp)
     app.register_blueprint(auth.bp)
     app.register_blueprint(api.bp)
@@ -38,6 +38,7 @@ def create_app(config_class=None):
     app.register_blueprint(vendors.bp)
     app.register_blueprint(institutions.bp)
     app.register_blueprint(team.bp)
+    app.register_blueprint(admin.bp)
 
     # Initialize OAuth (Google)
     try:

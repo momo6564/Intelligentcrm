@@ -161,6 +161,9 @@
         <a href="/crm" class="nav-link"><span>Unified CRM</span><span class="text-[10px] text-slate-400">Pipeline</span></a>
         <a href="/team" class="nav-link"><span>Team Workspace</span><span class="text-[10px] text-slate-400">Members</span></a>
         <a href="/team/dashboard" class="nav-link"><span>Team Dashboard</span><span class="text-[10px] text-slate-400">Analytics</span></a>
+        {% if me.role and me.role|lower == "admin" %}
+          <a href="/admin" class="nav-link"><span>Admin</span><span class="text-[10px] text-slate-400">Control</span></a>
+        {% endif %}
       </nav>
       <div class="mt-8 panel-muted p-3 text-xs text-slate-600">
         <div class="font-semibold">{{ me.username }} ({{ me.role }})</div>
@@ -186,6 +189,30 @@
       </div>
     </main>
   </div>
+  <div x-data="feedbackWidget()">
+    <div class="fixed right-4 bottom-20 z-40">
+      <button type="button" class="btn-primary px-3 py-2 text-xs shadow-lg" @click="open = true">Feedback</button>
+    </div>
+    <div x-show="open" x-cloak class="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 p-4">
+      <div class="panel w-full max-w-md p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-semibold">Send Feedback</div>
+          <button type="button" class="btn-ghost px-2 py-1 text-xs" @click="open = false">Close</button>
+        </div>
+        <textarea x-model="message" rows="4" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Share what you noticed or need..."></textarea>
+        <div class="space-y-2">
+          <input type="file" accept="image/*" class="text-xs" @change="pickFile($event)" x-ref="fileInput">
+          <div class="text-xs text-slate-500" x-text="fileName ? `Attached: ${fileName}` : 'Optional: add a screenshot'"></div>
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <button type="button" class="btn-ghost px-3 py-2 text-xs" @click="reset()">Clear</button>
+          <button type="button" class="btn-primary px-3 py-2 text-xs" :disabled="sending" @click="submit()">
+            <span x-text="sending ? 'Sending...' : 'Send'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
   <div id="appToastHost" class="fixed right-4 bottom-4 z-50 space-y-2 pointer-events-none"></div>
   <script>
     window.appToast = function(message, level){
@@ -206,6 +233,56 @@
       }, 2200);
       setTimeout(() => node.remove(), 2600);
     };
+  </script>
+  <script>
+    function feedbackWidget(){
+      return {
+        open: false,
+        sending: false,
+        message: "",
+        file: null,
+        fileName: "",
+        pickFile(evt){
+          const file = evt.target.files && evt.target.files[0];
+          this.file = file || null;
+          this.fileName = file ? file.name : "";
+        },
+        reset(){
+          this.message = "";
+          this.file = null;
+          this.fileName = "";
+          if(this.$refs && this.$refs.fileInput){ this.$refs.fileInput.value = ""; }
+        },
+        async submit(){
+          if(this.sending) return;
+          if(!this.message.trim() && !this.file){
+            (window.appToast || alert)("Add a message or attach a screenshot.", "error");
+            return;
+          }
+          this.sending = true;
+          try{
+            const fd = new FormData();
+            if(this.message.trim()) fd.append("message", this.message.trim());
+            fd.append("page_url", window.location.pathname + window.location.search);
+            fd.append("page_title", document.title || "");
+            if(this.file) fd.append("image", this.file);
+            const resp = await fetch("/api/feedback", {method:"POST", body: fd});
+            const data = await resp.json();
+            if(!data.ok){
+              (window.appToast || alert)(data.error || "Could not send feedback", "error");
+              return;
+            }
+            this.reset();
+            this.open = false;
+            (window.appToast || alert)("Feedback sent. Thank you!", "success");
+          }catch(_err){
+            (window.appToast || alert)("Could not send feedback", "error");
+          }finally{
+            this.sending = false;
+          }
+        },
+      };
+    }
   </script>
   {% block extra_scripts %}{% endblock %}
 </body>

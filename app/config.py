@@ -30,6 +30,7 @@ class Config:
     GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
     GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
     GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI", "")
+    FEEDBACK_UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "uploads", "feedback")
     
     LEAD_STAGES = {"prospect", "contacted", "responded", "negotiating", "won", "lost"}
     SECURITY_QUESTIONS = [
