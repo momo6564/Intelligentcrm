@@ -4,7 +4,7 @@ from urllib.parse import quote_plus
 from flask import Blueprint, render_template, redirect, url_for
 from ..auth import login_required, get_session_user
 from ..config import Config
-from ..database import get_connection, ensure_crm_tables
+from ..database import get_connection, ensure_crm_tables, ensure_institutions_table
 from ..services.dashboard import manufacturer_dashboard_dataset
 from ..utils.text_utils import clean_text
 from ..utils.workspace import workspace_id_for_user
@@ -31,6 +31,9 @@ def dashboard_page():
             orgs_served=[],
             chapters_served=[],
             vendors_served=[],
+            served_map_points=[],
+            needs_follow_up=[],
+            recent_activity=[],
             error="Run import_csv.py first",
         )
     
@@ -105,6 +108,7 @@ def dashboard_page():
 
     conn = get_connection()
     ensure_crm_tables(conn)
+    ensure_institutions_table(conn)
     today = date.today().isoformat()
     follow_up_rows = conn.execute(
         """
@@ -199,6 +203,95 @@ def dashboard_page():
         "chapters_served": len(chapters_served),
         "vendors_served": len(vendors_served),
     }
+
+    institution_rows = conn.execute(
+        """
+        SELECT id, location_name, city, state, latitude, longitude, control, institution_level
+        FROM institutions
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+          AND trim(coalesce(latitude, '')) <> ''
+          AND trim(coalesce(longitude, '')) <> ''
+        """
+    ).fetchall()
+    institution_by_id = {}
+    institution_by_name = {}
+    for row in institution_rows:
+        item = {k: row[k] for k in row.keys()}
+        try:
+            item["latitude"] = float(item["latitude"])
+            item["longitude"] = float(item["longitude"])
+        except (TypeError, ValueError):
+            continue
+        institution_by_id[str(item["id"])] = item
+        lookup_key = clean_text(item.get("location_name")).lower()
+        if lookup_key and lookup_key not in institution_by_name:
+            institution_by_name[lookup_key] = item
+
+    served_map_points = {}
+
+    def upsert_map_point(inst: dict, *, school_row=None, institution_contact=False):
+        key = str(inst.get("id"))
+        point = served_map_points.setdefault(
+            key,
+            {
+                "institution_id": int(inst["id"]),
+                "institution_name": clean_text(inst.get("location_name")),
+                "city": clean_text(inst.get("city")),
+                "state": clean_text(inst.get("state")),
+                "latitude": float(inst["latitude"]),
+                "longitude": float(inst["longitude"]),
+                "control": clean_text(inst.get("control")),
+                "institution_level": clean_text(inst.get("institution_level")),
+                "chapter_count": 0,
+                "org_count": 0,
+                "has_chapter_service": False,
+                "has_institution_service": False,
+            },
+        )
+        if school_row:
+            point["has_chapter_service"] = True
+            point["chapter_count"] = max(int(point["chapter_count"]), int(school_row.get("chapters_count") or 0))
+            point["org_count"] = max(int(point["org_count"]), int(school_row.get("org_count") or 0))
+        if institution_contact:
+            point["has_institution_service"] = True
+
+    for row in schools_served:
+        school_key = clean_text(row.get("school")).lower()
+        inst = institution_by_name.get(school_key)
+        if not inst:
+            continue
+        upsert_map_point(inst, school_row=row)
+
+    served_institution_rows = conn.execute(
+        """
+        SELECT name, connection
+        FROM crm_contacts
+        WHERE workspace_id=?
+          AND type IN ('school', 'other')
+          AND lower(coalesce(status, ''))='closed'
+        ORDER BY id DESC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    for row in served_institution_rows:
+        connection = clean_text(row["connection"])
+        inst = None
+        if connection.startswith("institution:"):
+            inst = institution_by_id.get(connection.split(":", 1)[1])
+        if not inst:
+            inst = institution_by_name.get(clean_text(row["name"]).lower())
+        if not inst:
+            continue
+        upsert_map_point(inst, institution_contact=True)
+
+    served_map_points = sorted(
+        served_map_points.values(),
+        key=lambda item: (
+            -int(item.get("has_institution_service") or 0),
+            -int(item.get("chapter_count") or 0),
+            item.get("institution_name", ""),
+        ),
+    )
     return render_app(
         "dashboards/dashboard.html",
         metrics=metrics,
@@ -206,6 +299,7 @@ def dashboard_page():
         orgs_served=orgs_served,
         chapters_served=chapters_served,
         vendors_served=vendors_served,
+        served_map_points=served_map_points,
         needs_follow_up=needs_follow_up,
         recent_activity=recent_activity,
         error="",

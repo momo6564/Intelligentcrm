@@ -12,6 +12,7 @@ from ..database import get_connection, ensure_crm_tables, ensure_vendor_table, e
 from ..config import Config
 from ..services.dashboard import manufacturer_dashboard_snapshot, manufacturer_dashboard_dataset
 from ..services.chapters import fetch_normalized_rows, get_chapter_by_id
+from ..services.institutions import fetch_institution_profile
 from ..services.vendors import vendor_competitors, build_vendor_hot_leads
 from ..utils.text_utils import clean_text, clean_date, norm_state
 from ..utils.email import send_email_best_effort
@@ -2514,6 +2515,8 @@ def api_institutions():
     ensure_institutions_table(conn)
     page_raw = clean_text(request.args.get("page"))
     limit_raw = clean_text(request.args.get("limit"))
+    all_raw = clean_text(request.args.get("all")).lower()
+    all_rows = all_raw in {"1", "true", "yes"}
     page = int(page_raw) if page_raw.isdigit() and int(page_raw) > 0 else 1
     limit = int(limit_raw) if limit_raw.isdigit() and int(limit_raw) > 0 else 50
     limit = min(limit, 50)
@@ -2590,18 +2593,32 @@ def api_institutions():
         total_all = conn.execute("SELECT COUNT(*) FROM institutions").fetchone()[0]
 
     rows = conn.execute(
-        f"""
-        SELECT id, location_name, alias, parent_name, location_type, address, street, city, state, zip,
-               general_phone, admin_name, admin_phone, admin_email, fax, update_date,
-               dapip_id, ope_id, ipeds_unit_ids, parent_dapip_id, unitid,
-               institution_level, control, highest_offering, degree_granting_status, locale, website,
-               students_total, dorm_capacity, acceptance_rate
-        FROM institutions
-        {where_sql}
-        ORDER BY location_name ASC
-        LIMIT ? OFFSET ?
-        """,
-        tuple(params + [limit, offset]),
+        (
+            f"""
+            SELECT id, location_name, alias, parent_name, location_type, address, street, city, state, zip,
+                   general_phone, admin_name, admin_phone, admin_email, fax, update_date,
+                   dapip_id, ope_id, ipeds_unit_ids, parent_dapip_id, unitid,
+                   institution_level, control, highest_offering, degree_granting_status, locale, website,
+                   students_total, dorm_capacity, acceptance_rate, latitude, longitude
+            FROM institutions
+            {where_sql}
+            ORDER BY location_name ASC
+            """
+            if all_rows
+            else
+            f"""
+            SELECT id, location_name, alias, parent_name, location_type, address, street, city, state, zip,
+                   general_phone, admin_name, admin_phone, admin_email, fax, update_date,
+                   dapip_id, ope_id, ipeds_unit_ids, parent_dapip_id, unitid,
+                   institution_level, control, highest_offering, degree_granting_status, locale, website,
+                   students_total, dorm_capacity, acceptance_rate, latitude, longitude
+            FROM institutions
+            {where_sql}
+            ORDER BY location_name ASC
+            LIMIT ? OFFSET ?
+            """
+        ),
+        tuple(params if all_rows else params + [limit, offset]),
     ).fetchall()
     out = [{k: row[k] for k in row.keys()} for row in rows]
     payload = {"ok": True, "results": out, "total": int(total), "page": page}
@@ -2623,6 +2640,33 @@ def api_institutions():
             "degree_statuses": distinct("degree_granting_status"),
         }
     return jsonify(payload)
+
+
+@bp.route("/api/institutions/<int:institution_id>")
+@login_required()
+def api_institution_detail(institution_id: int):
+    if not os.path.exists(Config.DB_PATH):
+        return jsonify({"ok": False, "error": "Run import_csv.py first"}), 400
+
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    ensure_institutions_table(conn)
+    ensure_chapters_table(conn)
+
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    institution, chapters, my_status = fetch_institution_profile(conn, institution_id, workspace_id=workspace_id)
+    if not institution:
+        return jsonify({"ok": False, "error": "Institution not found"}), 404
+
+    return jsonify(
+        {
+            "ok": True,
+            "institution": institution,
+            "chapters": chapters,
+            "my_status": my_status,
+        }
+    )
 
 @bp.route("/api/leads/add", methods=["POST"])
 @login_required()

@@ -44,7 +44,7 @@
       grid-template-columns:1fr;
     }
     @media (min-width: 1024px){
-      .shell{ grid-template-columns:280px 1fr; }
+      .shell{ grid-template-columns:96px 1fr; }
     }
     .glass{
       background:var(--panel);
@@ -55,18 +55,130 @@
     .nav-link{
       display:flex;
       align-items:center;
-      justify-content:space-between;
+      justify-content:center;
       border-radius:12px;
-      padding:10px 12px;
+      padding:10px;
       font-size:14px;
       font-weight:600;
       color:#1a3a63;
       transition:all .18s ease;
+      position:relative;
+      min-height:48px;
     }
     .nav-link:hover{
       background:linear-gradient(180deg, rgba(255,255,255,.96), rgba(238,247,255,.96));
       color:#0f3566;
       transform:translateY(-1px);
+    }
+    .nav-link-active{
+      background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(232,243,255,.98));
+      color:#0f3566;
+      box-shadow:var(--shadow-soft);
+    }
+    .nav-icon{
+      width:20px;
+      height:20px;
+      flex:0 0 auto;
+    }
+    .nav-tooltip{
+      position:absolute;
+      left:calc(100% + 12px);
+      top:50%;
+      transform:translate(-6px, -50%);
+      border:1px solid var(--line);
+      background:#ffffffeb;
+      color:#123d71;
+      border-radius:12px;
+      box-shadow:var(--shadow-soft);
+      padding:8px 10px;
+      font-size:12px;
+      font-weight:700;
+      white-space:nowrap;
+      opacity:0;
+      pointer-events:none;
+      transition:all .18s ease;
+      z-index:20;
+    }
+    .nav-link:hover .nav-tooltip,
+    .nav-link:focus-visible .nav-tooltip,
+    .rail-brand:hover .nav-tooltip,
+    .rail-user:hover .nav-tooltip,
+    .rail-logout:hover .nav-tooltip{
+      opacity:1;
+      transform:translate(0, -50%);
+    }
+    .rail-brand,
+    .rail-user,
+    .rail-logout{
+      position:relative;
+    }
+    .rail-brand-mark{
+      width:48px;
+      height:48px;
+      border-radius:16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-weight:800;
+      letter-spacing:.08em;
+      color:#0f3566;
+      background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(235,245,255,.98));
+      border:1px solid var(--line);
+      box-shadow:var(--shadow-soft);
+      margin-inline:auto;
+    }
+    .rail-user-card{
+      width:52px;
+      height:52px;
+      margin-inline:auto;
+      border-radius:16px;
+      border:1px solid var(--line);
+      background:#ffffffd9;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:14px;
+      font-weight:800;
+      color:#123d71;
+      box-shadow:var(--shadow-soft);
+    }
+    .rail-logout-btn{
+      width:44px;
+      height:44px;
+      margin-inline:auto;
+      border-radius:14px;
+      border:1px solid var(--line-strong);
+      background:#fff;
+      color:#0f3566;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      transition:all .18s ease;
+    }
+    .rail-logout-btn:hover{ background:#eef6ff; transform:translateY(-1px); }
+    @media (max-width: 1023px){
+      .nav-link{
+        justify-content:flex-start;
+        gap:10px;
+        padding:10px 12px;
+      }
+      .nav-tooltip{
+        position:static;
+        opacity:1;
+        pointer-events:auto;
+        transform:none;
+        border:none;
+        box-shadow:none;
+        background:transparent;
+        padding:0;
+        font-size:14px;
+        font-weight:600;
+      }
+      .rail-brand-mark,
+      .rail-user-card,
+      .rail-logout-btn{
+        margin-inline:0;
+      }
     }
     .panel{
       border:1px solid var(--line);
@@ -144,35 +256,84 @@
     a{ transition:all .18s ease; }
     .sticky.top-0{ backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
   </style>
+  {% block extra_head %}{% endblock %}
 </head>
-<body class="min-h-screen text-slate-800">
+<body class="min-h-screen text-slate-800 {% block body_class %}{% endblock %}">
   <div class="shell">
-    <aside class="glass border-r border-slate-200/80 p-4 lg:p-5">
-      <div class="mb-6 panel p-4">
-        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Greek Chapters</div>
-        <div class="text-xl font-extrabold text-[#0f3566]">Intelligence CRM</div>
-        <div class="text-xs text-slate-500 mt-1">Light blue workspace</div>
+    {% macro nav_icon(name) -%}
+      {% if name == "dashboard" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 13h8V3H3z"/><path d="M13 21h8v-6h-8z"/><path d="M13 10h8V3h-8z"/><path d="M3 21h8v-6H3z"/></svg>
+      {% elif name == "chapters" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 4h10l3 3v13H4V7z"/><path d="M14 4v4h4"/><path d="M8 12h8"/><path d="M8 16h6"/></svg>
+      {% elif name == "vendors" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h18"/><path d="M5 7V5h14v2"/><path d="M6 7v12h12V7"/><path d="M10 11h4"/><path d="M10 15h4"/></svg>
+      {% elif name == "institutions" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10 12 4l9 6"/><path d="M5 10v8"/><path d="M9 10v8"/><path d="M15 10v8"/><path d="M19 10v8"/><path d="M3 20h18"/></svg>
+      {% elif name == "crm" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16v12H4z"/><path d="M8 10h8"/><path d="M8 14h5"/></svg>
+      {% elif name == "team" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3"/><path d="M20 21v-2a4 4 0 0 0-3-3.87"/><path d="M16.5 4.13a3 3 0 0 1 0 5.74"/></svg>
+      {% elif name == "team_dashboard" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V5"/><path d="M10 19V9"/><path d="M16 19V12"/><path d="M22 19V7"/></svg>
+      {% elif name == "admin" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-.4-1.1 1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2.9a2 2 0 1 1 0-4H3a1.7 1.7 0 0 0 1.1-.4 1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V2.9a2 2 0 1 1 4 0V3a1.7 1.7 0 0 0 .4 1.1 1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.28.3.48.66.6 1.06.1.31.38.54.7.54H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.1.4c-.28.26-.48.62-.41 1z"/></svg>
+      {% else %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/></svg>
+      {% endif %}
+    {%- endmacro %}
+    {% set nav_items = [
+      {"href":"/dashboard","label":"Dashboard","icon":"dashboard","prefix":"/dashboard"},
+      {"href":"/chapters","label":"Chapter Explorer","icon":"chapters","prefix":"/chapters"},
+      {"href":"/vendors","label":"Vendor Explorer","icon":"vendors","prefix":"/vendors"},
+      {"href":"/institutions","label":"Education Institutions","icon":"institutions","prefix":"/institutions"},
+      {"href":"/crm","label":"Unified CRM","icon":"crm","prefix":"/crm"},
+      {"href":"/team","label":"Team Workspace","icon":"team","prefix":"/team"},
+      {"href":"/team/dashboard","label":"Team Dashboard","icon":"team_dashboard","prefix":"/team/dashboard"}
+    ] %}
+    <aside class="glass border-r border-slate-200/80 p-3 lg:px-4 lg:py-5">
+      <div class="rail-brand mb-6 flex justify-center">
+        <a href="/dashboard" class="rail-brand-mark" aria-label="Greek Chapters Intelligence CRM">GC</a>
+        <div class="nav-tooltip">
+          <div>Greek Chapters</div>
+          <div class="text-[11px] font-semibold text-slate-500">Intelligence CRM</div>
+        </div>
       </div>
-      <nav class="space-y-1 text-sm">
-        <a href="/dashboard" class="nav-link"><span>Dashboard</span><span class="text-[10px] text-slate-400">Home</span></a>
-        <a href="/chapters" class="nav-link"><span>Chapter Explorer</span><span class="text-[10px] text-slate-400">Leads</span></a>
-        <a href="/vendors" class="nav-link"><span>Vendor Explorer</span><span class="text-[10px] text-slate-400">Partners</span></a>
-        <a href="/institutions" class="nav-link"><span>Education Institutions</span><span class="text-[10px] text-slate-400">Schools</span></a>
-        <a href="/crm" class="nav-link"><span>Unified CRM</span><span class="text-[10px] text-slate-400">Pipeline</span></a>
-        <a href="/team" class="nav-link"><span>Team Workspace</span><span class="text-[10px] text-slate-400">Members</span></a>
-        <a href="/team/dashboard" class="nav-link"><span>Team Dashboard</span><span class="text-[10px] text-slate-400">Analytics</span></a>
+
+      <nav class="space-y-2 text-sm">
+        {% for item in nav_items %}
+          {% set active = request.path == item.href or (item.prefix != "/team" and request.path.startswith(item.prefix)) or (item.prefix == "/team" and request.path == "/team") %}
+          <a href="{{ item.href }}" class="nav-link {% if active %}nav-link-active{% endif %}" aria-label="{{ item.label }}">
+            {{ nav_icon(item.icon) }}
+            <span class="nav-tooltip">{{ item.label }}</span>
+          </a>
+        {% endfor %}
         {% if me.role and me.role|lower == "admin" %}
-          <a href="/admin" class="nav-link"><span>Admin</span><span class="text-[10px] text-slate-400">Control</span></a>
+          {% set active = request.path.startswith("/admin") %}
+          <a href="/admin" class="nav-link {% if active %}nav-link-active{% endif %}" aria-label="Admin">
+            {{ nav_icon("admin") }}
+            <span class="nav-tooltip">Admin</span>
+          </a>
         {% endif %}
       </nav>
-      <div class="mt-8 panel-muted p-3 text-xs text-slate-600">
-        <div class="font-semibold">{{ me.username }} ({{ me.role }})</div>
-        <div>{{ me.account_name or "No account mapped" }}</div>
-        <a href="/logout" class="mt-2 inline-block text-blue-700 hover:underline font-semibold">Logout</a>
+
+      <div class="mt-8 flex flex-col items-center gap-3">
+        <div class="rail-user">
+          <div class="rail-user-card">{{ (me.username or "?")[:1] | upper }}</div>
+          <div class="nav-tooltip">
+            <div>{{ me.username }}{% if me.role %} ({{ me.role }}){% endif %}</div>
+            <div class="text-[11px] font-semibold text-slate-500">{{ me.account_name or "No account mapped" }}</div>
+          </div>
+        </div>
+        <div class="rail-logout">
+          <a href="/logout" class="rail-logout-btn" aria-label="Logout">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          </a>
+          <span class="nav-tooltip">Logout</span>
+        </div>
       </div>
     </aside>
 
-    <main class="p-4 lg:p-6">
+    <main class="p-4 lg:p-6 {% block main_class %}{% endblock %}">
       <header class="glass soft-shadow mb-4 rounded-2xl border border-slate-200/80 px-4 py-3 flex items-center justify-between">
         <div>
           <h1 class="text-lg font-extrabold tracking-tight text-[#123d71]">{% block page_title %}Workspace{% endblock %}</h1>
@@ -181,8 +342,8 @@
         <div class="text-xs text-slate-500 panel-muted px-2 py-1">Live workspace</div>
       </header>
 
-      <div class="grid grid-cols-1 {% block main_grid %}xl:grid-cols-[1fr_360px]{% endblock %} gap-4">
-        <section class="space-y-4">{% block content %}{% endblock %}</section>
+      <div class="grid grid-cols-1 {% block main_grid %}xl:grid-cols-[1fr_360px]{% endblock %} gap-4 {% block workspace_grid_class %}{% endblock %}">
+        <section class="space-y-4 {% block content_section_class %}{% endblock %}">{% block content %}{% endblock %}</section>
         {% block context_panel %}
           <aside class="hidden xl:block"></aside>
         {% endblock %}

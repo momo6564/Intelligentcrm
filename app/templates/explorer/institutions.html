@@ -1,328 +1,210 @@
 {% extends "layouts/app_shell.html" %}
 {% block title %}Education Institutions{% endblock %}
 {% block page_title %}Education Institutions{% endblock %}
-{% block page_subtitle %}Search, filter, and open institution profiles{% endblock %}
-{% block main_grid %}xl:grid-cols-1{% endblock %}
+{% block page_subtitle %}Search schools, select a campus, and jump into the full map only when you need deeper exploration{% endblock %}
+{% block main_grid %}xl:grid-cols-[minmax(0,1fr)_420px]{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    [x-cloak]{display:none!important;}
+    .institution-tooltip-name{font-weight:800;font-size:.84rem;line-height:1.2;}
+    .institution-tooltip-meta{font-size:.72rem;color:#4d6691;}
+    .leaflet-tooltip.institution-tooltip{border:1px solid #cfe0fb;border-radius:.85rem;background:rgba(255,255,255,.97);color:#123d71;box-shadow:0 14px 28px rgba(20,73,141,.16);padding:.55rem .7rem;}
+    .leaflet-tooltip.institution-tooltip:before{display:none;}
+    .leaflet-container{font-family:"Manrope","Segoe UI",sans-serif;background:#dbeafe;}
+    .leaflet-control-zoom a{border-color:#b4cdf4!important;color:#123d71!important;background:#ffffff!important;box-shadow:0 10px 20px rgba(18,61,113,.12);}
+    .leaflet-control-attribution{background:rgba(255,255,255,.85)!important;color:#4d6691!important;}
+    .mini-map-shell{position:relative;overflow:hidden;border-radius:1.4rem;border:1px solid rgba(180,205,244,.95);background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(239,247,255,.98));box-shadow:0 18px 40px rgba(18,61,113,.12);}
+    #institutions-preview-map{height:clamp(22rem, 58vh, 36rem);width:100%;background:#dbeafe;}
+    .table-row-active{background:rgba(231,242,255,.9);}
+    .sidebar-label{font-size:.72rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#5a78a8;}
+  </style>
+{% endblock %}
+
 {% block content %}
-<style>[x-cloak]{display:none!important;}</style>
-<div x-data="institutionsApp()" x-init="load()" class="space-y-4">
+<div x-data x-init="$store.institutionsExplorer.init()" class="space-y-4">
   <div class="panel p-4 space-y-3">
     <div class="flex flex-wrap items-center gap-2">
-      <div class="flex-1 min-w-[220px]">
-        <input x-model="search" @input="debounceApply()" placeholder="Search universities, cities, or states..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <div class="min-w-[260px] flex-1">
+        <input x-model="$store.institutionsExplorer.filters.search" @input="$store.institutionsExplorer.debounceApply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Search universities, cities, aliases, or websites...">
       </div>
-      <select x-model="filters.state" @change="apply()" class="min-w-[160px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <select x-model="$store.institutionsExplorer.filters.state" @change="$store.institutionsExplorer.applyFilters({fit:true})" class="min-w-[150px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All states</option>
-        <template x-for="v in options.states" :key="v"><option :value="v" x-text="v"></option></template>
+        <template x-for="state in $store.institutionsExplorer.options.states" :key="state">
+          <option :value="state" x-text="state"></option>
+        </template>
       </select>
-      <select x-model="filters.institution_level" @change="apply()" class="min-w-[170px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
-        <option value="">All levels</option>
-        <template x-for="v in options.levels" :key="v"><option :value="v" x-text="formatLevel(v)"></option></template>
-      </select>
-      <select x-model="filters.control" @change="apply()" class="min-w-[190px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+      <select x-model="$store.institutionsExplorer.filters.control" @change="$store.institutionsExplorer.applyFilters({fit:true})" class="min-w-[180px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
         <option value="">All control types</option>
-        <template x-for="v in options.controls" :key="v"><option :value="v" x-text="shortControl(v)"></option></template>
+        <template x-for="control in $store.institutionsExplorer.options.controls" :key="control">
+          <option :value="control" x-text="$store.institutionsExplorer.shortControl(control)"></option>
+        </template>
       </select>
-      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="applySmartDefaults()">Smart Defaults</button>
-      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="showAdvanced = true">More Filters</button>
-      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="reset()">Reset</button>
+      <select x-model="$store.institutionsExplorer.filters.institution_level" @change="$store.institutionsExplorer.applyFilters({fit:true})" class="min-w-[140px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All levels</option>
+        <template x-for="level in $store.institutionsExplorer.options.levels" :key="level">
+          <option :value="level" x-text="$store.institutionsExplorer.formatLevel(level)"></option>
+        </template>
+      </select>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="$store.institutionsExplorer.resetFilters()">Reset</button>
     </div>
     <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-      <span x-text="summaryLine()"></span>
-      <span class="text-[11px]" x-show="filters.institution_level || filters.degree_granting_status">Defaults: 4-year + Degree-granting</span>
+      <div x-text="$store.institutionsExplorer.filterSummary()"></div>
+      <div x-show="$store.institutionsExplorer.error" class="text-rose-700" x-text="$store.institutionsExplorer.error"></div>
     </div>
   </div>
 
   <div class="panel overflow-hidden">
-    <div class="overflow-y-auto overflow-x-hidden max-h-[70vh]">
-      <table class="w-full text-sm table-fixed">
+    <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+      <div>
+        <div class="text-sm font-semibold text-[#123d71]">Institution Table</div>
+        <div class="text-xs text-slate-500">Click a row to focus its marker in the map preview on the right.</div>
+      </div>
+      <a class="btn-ghost px-3 py-2 text-xs" :href="$store.institutionsExplorer.mapPageUrl($store.institutionsExplorer.selectedId)">Open Full Map</a>
+    </div>
+
+    <div class="overflow-x-auto overflow-y-auto max-h-[72vh]">
+      <table class="w-full text-sm">
         <thead class="sticky top-0 table-head text-xs uppercase text-slate-500">
           <tr>
-            <th class="text-left px-3 py-2 w-[38%]">Name</th>
-            <th class="text-left px-3 py-2">City</th>
-            <th class="text-left px-3 py-2 w-[80px]">State</th>
-            <th class="text-left px-3 py-2">Type</th>
-            <th class="text-left px-3 py-2">Control</th>
-            <th class="text-left px-3 py-2 w-[140px]">Actions</th>
+            <th class="px-4 py-3 text-left">Institution</th>
+            <th class="px-3 py-3 text-left">City</th>
+            <th class="px-3 py-3 text-left">State</th>
+            <th class="px-3 py-3 text-left">Level</th>
+            <th class="px-3 py-3 text-left">Control</th>
+            <th class="px-3 py-3 text-left">Students</th>
+            <th class="px-3 py-3 text-left">Actions</th>
           </tr>
         </thead>
         <tbody>
-          <tr x-show="loading">
-            <td colspan="6" class="px-3 py-4">
+          <tr x-show="$store.institutionsExplorer.loading">
+            <td colspan="7" class="px-4 py-6">
               <div class="animate-pulse space-y-2">
-                <div class="h-3 w-2/3 rounded bg-slate-200"></div>
                 <div class="h-3 w-1/2 rounded bg-slate-200"></div>
-                <div class="h-3 w-3/4 rounded bg-slate-200"></div>
+                <div class="h-3 w-2/3 rounded bg-slate-200"></div>
+                <div class="h-3 w-1/3 rounded bg-slate-200"></div>
               </div>
             </td>
           </tr>
-          <template x-for="r in rows" :key="r.id">
-            <tr class="border-b border-slate-100 hover:bg-slate-50 transition cursor-pointer" @click="openDrawer(r.id)">
-              <td class="px-3 py-3">
-                <div class="font-semibold text-slate-800 truncate" x-text="r.location_name || '-'"></div>
-                <div class="text-xs text-slate-500 truncate" x-show="r.alias" x-text="`Alias: ${r.alias}`"></div>
-                <div class="flex flex-wrap gap-1 mt-1">
-                  <span x-show="r.control" class="rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[11px] font-semibold" x-text="shortControl(r.control)"></span>
-                  <span x-show="r.institution_level" class="rounded-full bg-amber-50 text-amber-700 px-2 py-0.5 text-[11px] font-semibold" x-text="formatLevel(r.institution_level)"></span>
-                  <span x-show="r.highest_offering" class="rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px] font-semibold" x-text="shortOffering(r.highest_offering)"></span>
+          <template x-for="row in $store.institutionsExplorer.tableRows()" :key="row.id">
+            <tr class="cursor-pointer border-b border-slate-100 transition hover:bg-slate-50"
+                :class="Number($store.institutionsExplorer.selectedId) === Number(row.id) ? 'table-row-active' : ''"
+                @click="$store.institutionsExplorer.selectInstitution(row.id)">
+              <td class="px-4 py-3">
+                <div class="font-semibold text-slate-800" x-text="row.location_name || '-'"></div>
+                <div class="mt-1 flex flex-wrap gap-1 text-[11px]">
+                  <span x-show="row.alias" class="rounded-full bg-slate-100 px-2 py-1 text-slate-600" x-text="row.alias"></span>
+                  <span x-show="row.degree_granting_status" class="rounded-full bg-violet-50 px-2 py-1 text-violet-700" x-text="row.degree_granting_status"></span>
                 </div>
               </td>
-              <td class="px-3 py-2 truncate" x-text="r.city || '-'"></td>
-              <td class="px-3 py-2" x-text="r.state || '-'"></td>
-              <td class="px-3 py-2 truncate" x-text="formatLevel(r.institution_level) || r.location_type || '-'"></td>
-              <td class="px-3 py-2 truncate" x-text="shortControl(r.control) || '-'"></td>
-              <td class="px-3 py-2">
-                <div class="flex items-center gap-1" @click.stop>
-                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/institutions/detail?institution_id=${encodeURIComponent(r.id)}`">Details</a>
-                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/institutions/detail?institution_id=${encodeURIComponent(r.id)}`">Chapters</a>
-                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="researchUrl(r)" target="_blank" rel="noopener">Research</a>
+              <td class="px-3 py-3" x-text="row.city || '-'"></td>
+              <td class="px-3 py-3" x-text="row.state || '-'"></td>
+              <td class="px-3 py-3" x-text="$store.institutionsExplorer.formatLevel(row.institution_level) || '-'"></td>
+              <td class="px-3 py-3" x-text="$store.institutionsExplorer.shortControl(row.control) || '-'"></td>
+              <td class="px-3 py-3" x-text="$store.institutionsExplorer.number(row.students_total)"></td>
+              <td class="px-3 py-3">
+                <div class="flex items-center gap-2" @click.stop>
+                  <button type="button" class="btn-ghost px-2 py-1 text-[11px]" @click="$store.institutionsExplorer.selectInstitution(row.id)">Preview</button>
+                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="`/institutions/detail?institution_id=${encodeURIComponent(row.id)}`">Detail</a>
+                  <a class="btn-ghost px-2 py-1 text-[11px]" :href="$store.institutionsExplorer.mapPageUrl(row.id)">Map</a>
                 </div>
               </td>
             </tr>
           </template>
-          <tr x-show="!loading && rows.length===0">
-            <td colspan="6" class="px-3 py-8 text-center text-slate-500">No institutions match your filters.</td>
+          <tr x-show="!$store.institutionsExplorer.loading && !$store.institutionsExplorer.filteredRows.length">
+            <td colspan="7" class="px-4 py-8 text-center text-slate-500">No institutions match the current filters.</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div class="px-4 py-3 border-t border-slate-200 flex items-center justify-between text-xs">
-      <span class="text-slate-500" x-text="footerLine()"></span>
-      <button x-show="rows.length < total" @click="loadMore()" class="btn-ghost px-3 py-1.5">Load 50 more</button>
-    </div>
-  </div>
 
-  <div x-show="showAdvanced" x-cloak class="fixed inset-0 z-30">
-    <div class="absolute inset-0 bg-slate-900/20" @click="showAdvanced=false"></div>
-    <div class="absolute right-4 top-24 w-full max-w-md panel p-4 space-y-3">
-      <div class="flex items-center justify-between">
-        <div class="text-sm font-semibold">Advanced Filters</div>
-        <button class="btn-ghost px-2 py-1 text-xs" @click="showAdvanced=false">Close</button>
+    <div class="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
+      <div>
+        Showing <span x-text="$store.institutionsExplorer.number(Math.min($store.institutionsExplorer.tableVisible, $store.institutionsExplorer.filteredRows.length))"></span>
+        of <span x-text="$store.institutionsExplorer.number($store.institutionsExplorer.filteredRows.length)"></span>
       </div>
-      <div class="grid gap-2">
-        <select x-model="filters.highest_offering" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-          <option value="">All highest offerings</option>
-          <template x-for="v in options.highestOfferings" :key="v"><option :value="v" x-text="v"></option></template>
-        </select>
-        <select x-model="filters.locale" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-          <option value="">All locales</option>
-          <template x-for="v in options.locales" :key="v"><option :value="v" x-text="v"></option></template>
-        </select>
-        <select x-model="filters.degree_granting_status" @change="apply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-          <option value="">All degree-granting statuses</option>
-          <template x-for="v in options.degreeStatuses" :key="v"><option :value="v" x-text="v"></option></template>
-        </select>
-        <div>
-          <div class="text-[11px] text-slate-500">Student size (total)</div>
-          <div class="grid grid-cols-2 gap-2 mt-1">
-            <input type="number" min="0" x-model="filters.students_min" @input="debounceApply()" placeholder="Min students" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-            <input type="number" min="0" x-model="filters.students_max" @input="debounceApply()" placeholder="Max students" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
-          </div>
-        </div>
-      </div>
-      <div class="text-[11px] text-slate-500">Student size ranges are based on the IPEDS EFTOTLT total.</div>
-    </div>
-  </div>
-
-  <div x-show="drawerOpen" x-cloak class="fixed inset-0 z-40">
-    <div class="absolute inset-0 bg-slate-900/20" @click="closeDrawer()"></div>
-    <div class="absolute right-0 top-0 h-full w-full max-w-[420px] panel rounded-none rounded-l-2xl p-4 overflow-y-auto"
-         x-transition:enter="transition transform duration-200"
-         x-transition:enter-start="translate-x-full"
-         x-transition:enter-end="translate-x-0"
-         x-transition:leave="transition transform duration-150"
-         x-transition:leave-start="translate-x-0"
-         x-transition:leave-end="translate-x-full">
-      <div class="flex items-center justify-between mb-2">
-        <div class="text-xs uppercase tracking-wide text-slate-500">Institution details</div>
-        <button class="btn-ghost px-2 py-1 text-xs" @click="closeDrawer()">Close</button>
-      </div>
-      <div x-html="drawerHtml"></div>
+      <button x-show="$store.institutionsExplorer.hasMoreRows()" type="button" class="btn-ghost px-3 py-2 text-xs" @click="$store.institutionsExplorer.loadMoreRows()">Load More</button>
     </div>
   </div>
 </div>
-
-<script>
-function institutionsApp(){
-  return {
-    rows:[], search:"", total:0, pageSize:50, page:1,
-    loading:false, searchTimer:null, drawerController:null,
-    drawerOpen:false, drawerHtml:"", showAdvanced:false, optionsLoaded:false, autoRelaxed:false, totalAll:0,
-    filters:{
-      state:"",
-      institution_level:"",
-      control:"",
-      highest_offering:"",
-      locale:"",
-      degree_granting_status:"",
-      students_min:"",
-      students_max:""
-    },
-    options:{states:[], levels:[], controls:[], highestOfferings:[], locales:[], degreeStatuses:[]},
-    debounceApply(){
-      if(this.searchTimer) clearTimeout(this.searchTimer);
-      this.searchTimer = setTimeout(() => this.apply(), 180);
-    },
-    formatLevel(value){
-      const v = (value || "").toLowerCase();
-      if(!v) return "";
-      if(v === "4 year") return "4-Year";
-      if(v === "2 year") return "2-Year";
-      if(v === "less than 2 year") return "<2-Year";
-      return value;
-    },
-    shortControl(value){
-      const v = (value || "").toLowerCase();
-      if(!v) return "";
-      if(v.startsWith("public")) return "Public";
-      if(v.includes("for-profit")) return "Private (For-profit)";
-      if(v.includes("not-for-profit")) return "Private (Nonprofit)";
-      return value;
-    },
-    shortOffering(value){
-      if(!value) return "";
-      const trimmed = String(value);
-      if(trimmed.length > 28){
-        return trimmed.split(" (")[0];
-      }
-      return trimmed;
-    },
-    researchUrl(row){
-      const name = row && row.location_name ? row.location_name : "";
-      const base = `${name} vendor list approved vendors procurement site:.edu`;
-      return `https://www.google.com/search?q=${encodeURIComponent(base)}`;
-    },
-    summaryLine(){
-      if(this.loading && !this.rows.length) return "Loading institutions...";
-      if(!this.total) return "0 institutions";
-      const end = this.rows.length;
-      if(this.totalAll && this.totalAll !== this.total){
-        return `${this.total.toLocaleString()} institutions • Showing 1–${end} (filtered from ${this.totalAll.toLocaleString()})`;
-      }
-      return `${this.total.toLocaleString()} institutions • Showing 1–${end}`;
-    },
-    footerLine(){
-      if(!this.total) return "Showing 0 records";
-      return `Showing ${this.rows.length} of ${this.total.toLocaleString()}`;
-    },
-    async load(resetPage=true){
-      if(resetPage){
-        this.page = 1;
-        this.rows = [];
-      }
-      this.loading = true;
-      try{
-        const params = new URLSearchParams({
-          page: String(this.page),
-          limit: String(this.pageSize),
-          q: this.search || "",
-          state: this.filters.state || "",
-          institution_level: this.filters.institution_level || "",
-          control: this.filters.control || "",
-          highest_offering: this.filters.highest_offering || "",
-          locale: this.filters.locale || "",
-          degree_granting_status: this.filters.degree_granting_status || "",
-          students_min: this.filters.students_min || "",
-          students_max: this.filters.students_max || ""
-        });
-        if(!this.optionsLoaded){
-          params.set("include_filters", "1");
-        }
-        const out = await fetch(`/api/institutions?${params.toString()}`).then(r=>r.json());
-        if(!out.ok){ this.rows=[]; this.total=0; return; }
-        const incoming = out.results || [];
-        this.total = Number(out.total || 0);
-        if(this.page === 1){
-          this.rows = incoming;
-        }else{
-          this.rows = [...this.rows, ...incoming];
-        }
-        if(this.page === 1 && this.total === 0 && !this.autoRelaxed && (this.filters.institution_level || this.filters.degree_granting_status)){
-          this.autoRelaxed = true;
-          this.filters.institution_level = "";
-          this.filters.degree_granting_status = "";
-          (window.appToast || alert)("No results with default filters. Showing all institutions.", "info");
-          this.loading = false;
-          return this.load(true);
-        }
-        if(out.filters && !this.optionsLoaded){
-          this.options.states = out.filters.states || [];
-          this.options.levels = out.filters.institution_levels || [];
-          this.options.controls = out.filters.controls || [];
-          this.options.highestOfferings = out.filters.highest_offerings || [];
-          this.options.locales = out.filters.locales || [];
-          this.options.degreeStatuses = out.filters.degree_statuses || [];
-          this.totalAll = Number(out.total_all || 0) || this.total;
-          this.optionsLoaded = true;
-        }
-      }catch(_err){
-        this.rows = [];
-        this.total = 0;
-        (window.appToast || alert)("Could not load institutions", "error");
-      }finally{
-        this.loading = false;
-        window.__institutionsApp = this;
-      }
-    },
-    apply(){
-      this.load(true);
-    },
-    loadMore(){
-      if(this.rows.length >= this.total) return;
-      this.page += 1;
-      this.load(false);
-    },
-    reset(){
-      this.search="";
-      this.filters = {
-        state:"",
-        institution_level:"",
-        control:"",
-        highest_offering:"",
-        locale:"",
-        degree_granting_status:"",
-        students_min:"",
-        students_max:""
-      };
-      this.autoRelaxed = false;
-      this.apply();
-    },
-    applySmartDefaults(){
-      this.filters.institution_level = "4 year";
-      this.filters.degree_granting_status = "Degree-granting";
-      this.apply();
-    },
-    closeDrawer(){
-      this.drawerOpen = false;
-    },
-    async openDrawer(institutionId){
-      this.drawerOpen = true;
-      if(this.drawerController){
-        try{ this.drawerController.abort(); }catch(_){}
-      }
-      const controller = new AbortController();
-      this.drawerController = controller;
-      this.drawerHtml = `
-        <div class="animate-pulse space-y-2">
-          <div class="h-4 w-40 rounded bg-slate-200"></div>
-          <div class="h-20 rounded-xl bg-slate-100"></div>
-          <div class="h-20 rounded-xl bg-slate-100"></div>
-        </div>
-      `;
-      try{
-        const out = await fetch(`/ui/institution-drawer?institution_id=${encodeURIComponent(institutionId)}`, {signal: controller.signal});
-        this.drawerHtml = await out.text();
-      }catch(err){
-        if(err && err.name === "AbortError") return;
-        this.drawerHtml = `<div class="text-sm text-rose-700">Could not load institution details.</div>`;
-      }finally{
-        if(this.drawerController === controller){
-          this.drawerController = null;
-        }
-      }
-    },
-  }
-}
-</script>
 {% endblock %}
-{% block context_panel %}{% endblock %}
+
+{% block context_panel %}
+<aside x-data x-init="$store.institutionsExplorer.init()" class="space-y-4 xl:sticky xl:top-6 self-start">
+  <div class="mini-map-shell">
+    <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+      <div>
+        <div class="sidebar-label">Map Preview</div>
+        <div class="mt-1 text-sm font-semibold text-[#123d71]">United States overview</div>
+      </div>
+      <a class="btn-primary px-3 py-2 text-[11px]" :href="$store.institutionsExplorer.mapPageUrl($store.institutionsExplorer.selectedId)">Open Full Map</a>
+    </div>
+    <div id="institutions-preview-map"></div>
+    <div class="border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
+      Hover markers to see school names. Click the preview map or a marker to jump into the dedicated map page.
+    </div>
+  </div>
+
+  <div class="panel p-4 space-y-3">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <div class="sidebar-label">Selected Campus</div>
+        <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.selectedInstitutionName()"></div>
+        <div class="mt-1 text-sm text-slate-500" x-text="$store.institutionsExplorer.selectedInstitutionLocation()"></div>
+      </div>
+      <div class="rounded-full px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide" :class="$store.institutionsExplorer.selectedStatusClass()" x-text="$store.institutionsExplorer.selectedStatusLabel()"></div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2">
+      <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+        <div class="text-[10px] uppercase tracking-[0.16em] text-slate-500">Students</div>
+        <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.number($store.institutionsExplorer.selectedInstitution()?.students_total)"></div>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+        <div class="text-[10px] uppercase tracking-[0.16em] text-slate-500">State</div>
+        <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.selectedInstitution()?.state || '-'"></div>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-1 text-[11px]">
+      <template x-for="tag in $store.institutionsExplorer.selectedTags()" :key="tag.value">
+        <span class="rounded-full px-2.5 py-1 font-semibold" :class="tag.tone" x-text="tag.value"></span>
+      </template>
+    </div>
+
+    <div class="text-sm text-slate-500">
+      <span class="font-semibold text-slate-700">Address:</span>
+      <span x-text="$store.institutionsExplorer.selectedAddress()"></span>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+      <a class="btn-ghost px-3 py-2 text-[11px]" :href="$store.institutionsExplorer.selectedProfileUrl()">Open Detail</a>
+      <a class="btn-ghost px-3 py-2 text-[11px]" :href="$store.institutionsExplorer.mapPageUrl($store.institutionsExplorer.selectedId)">Open Map View</a>
+      <a x-show="$store.institutionsExplorer.selectedWebsiteHref()" class="btn-ghost px-3 py-2 text-[11px]" :href="$store.institutionsExplorer.selectedWebsiteHref()" target="_blank" rel="noopener">Visit Website</a>
+    </div>
+  </div>
+</aside>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="{{ url_for('static', filename='institutions_explorer.js') }}"></script>
+  <script>
+    document.addEventListener("alpine:init", () => {
+      Alpine.store("institutionsExplorer", window.createInstitutionExplorerStore({
+        mode: "list",
+        mapElementId: "institutions-preview-map",
+        navigateMapClicks: true,
+        tablePageSize: 90,
+        initialInstitutionId: Number({{ request.args.get("institution_id", "")|tojson }}) || null,
+        initialFilters: {
+          search: {{ request.args.get("q", "")|tojson }},
+          state: {{ request.args.get("state", "")|tojson }},
+          control: {{ request.args.get("control", "")|tojson }},
+          institution_level: {{ request.args.get("institution_level", "")|tojson }},
+        }
+      }));
+    });
+  </script>
+{% endblock %}

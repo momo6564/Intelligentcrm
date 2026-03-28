@@ -1,188 +1,268 @@
 {% extends "layouts/app_shell.html" %}
 {% block title %}Institution Detail{% endblock %}
 {% block page_title %}Institution Detail{% endblock %}
-{% block page_subtitle %}Profile and accreditation metadata{% endblock %}
-{% block main_grid %}xl:grid-cols-[1fr_380px]{% endblock %}
+{% block page_subtitle %}Full campus map and institution intelligence in one workspace{% endblock %}
+{% block main_grid %}xl:grid-cols-[minmax(0,1fr)_430px]{% endblock %}
+{% block body_class %}h-screen overflow-hidden{% endblock %}
+{% block main_class %}h-screen overflow-hidden{% endblock %}
+{% block workspace_grid_class %}min-h-0 h-[calc(100vh-9.25rem)]{% endblock %}
+{% block content_section_class %}min-h-0{% endblock %}
+
+{% block extra_head %}
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    [x-cloak]{display:none!important;}
+    .detail-shell{height:100%;min-height:0;display:flex;flex-direction:column;gap:1rem;}
+    .detail-toolbar{flex:0 0 auto;}
+    .detail-map-stage{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;border-radius:1.5rem;border:1px solid rgba(180,205,244,.95);background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(239,247,255,.98));box-shadow:0 24px 55px rgba(18,61,113,.14);}
+    #institutions-detail-map{height:100%;width:100%;background:#dbeafe;}
+    .detail-map-overlay{position:absolute;left:1rem;right:1rem;top:1rem;z-index:500;display:flex;flex-wrap:wrap;gap:.75rem;align-items:flex-start;justify-content:space-between;pointer-events:none;}
+    .detail-map-card{pointer-events:auto;border:1px solid rgba(180,205,244,.95);background:rgba(255,255,255,.94);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 18px 34px rgba(20,73,141,.14);border-radius:1.2rem;padding:.85rem 1rem;}
+    .sidebar-scroll{height:100%;min-height:0;overflow-y:auto;padding-right:.25rem;}
+    .sidebar-label{font-size:.72rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#5a78a8;}
+    .chapter-list-scroll{max-height:22rem;overflow:auto;padding-right:.25rem;}
+    .leaflet-container{font-family:"Manrope","Segoe UI",sans-serif;background:#dbeafe;}
+    .leaflet-control-zoom a{border-color:#b4cdf4!important;color:#123d71!important;background:#ffffff!important;box-shadow:0 10px 20px rgba(18,61,113,.12);}
+    .leaflet-control-attribution{background:rgba(255,255,255,.85)!important;color:#4d6691!important;}
+    .leaflet-tooltip.institution-tooltip{border:1px solid #cfe0fb;border-radius:.85rem;background:rgba(255,255,255,.97);color:#123d71;box-shadow:0 14px 28px rgba(20,73,141,.16);padding:.55rem .7rem;}
+    .leaflet-tooltip.institution-tooltip:before{display:none;}
+    .institution-tooltip-name{font-weight:800;font-size:.84rem;line-height:1.2;}
+    .institution-tooltip-meta{font-size:.72rem;color:#4d6691;}
+    @media (max-width:1279px){
+      body{overflow:auto!important;height:auto!important;}
+      main{overflow:visible!important;height:auto!important;}
+      .detail-shell{height:auto;}
+      .detail-map-stage{min-height:34rem;}
+      #institutions-detail-map{height:34rem;}
+    }
+  </style>
+{% endblock %}
+
 {% block content %}
-  {% if error %}
-    <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-800">{{ error }}</div>
-  {% else %}
-    {% set website = institution.website or "" %}
-    {% set website_href = website %}
-    {% if website and "://" not in website %}
-      {% set website_href = "https://" + website %}
+<div x-data x-init="$store.institutionsExplorer.init()" class="detail-shell">
+  <div class="panel p-4 space-y-3 detail-toolbar">
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="/institutions" class="btn-ghost px-3 py-2 text-sm">Back to Table</a>
+      <div class="min-w-[240px] flex-1">
+        <input x-model="$store.institutionsExplorer.filters.search" @input="$store.institutionsExplorer.debounceApply()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="Search universities, cities, aliases, or websites...">
+      </div>
+      <select x-model="$store.institutionsExplorer.filters.state" @change="$store.institutionsExplorer.applyFilters({fit:true, preserveSelection:true})" class="min-w-[150px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All states</option>
+        <template x-for="state in $store.institutionsExplorer.options.states" :key="state">
+          <option :value="state" x-text="state"></option>
+        </template>
+      </select>
+      <select x-model="$store.institutionsExplorer.filters.control" @change="$store.institutionsExplorer.applyFilters({fit:true, preserveSelection:true})" class="min-w-[180px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All control types</option>
+        <template x-for="control in $store.institutionsExplorer.options.controls" :key="control">
+          <option :value="control" x-text="$store.institutionsExplorer.shortControl(control)"></option>
+        </template>
+      </select>
+      <select x-model="$store.institutionsExplorer.filters.institution_level" @change="$store.institutionsExplorer.applyFilters({fit:true, preserveSelection:true})" class="min-w-[140px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <option value="">All levels</option>
+        <template x-for="level in $store.institutionsExplorer.options.levels" :key="level">
+          <option :value="level" x-text="$store.institutionsExplorer.formatLevel(level)"></option>
+        </template>
+      </select>
+      <select x-model="$store.institutionsExplorer.currentTheme" @change="$store.institutionsExplorer.setTile($event.target.value)" class="min-w-[140px] rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <template x-for="theme in $store.institutionsExplorer.themeOptions" :key="theme.value">
+          <option :value="theme.value" x-text="theme.label"></option>
+        </template>
+      </select>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="$store.institutionsExplorer.resetFilters()">Reset</button>
+      <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="$store.institutionsExplorer.fitToFiltered()">Fit Map</button>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+      <div x-text="$store.institutionsExplorer.filterSummary()"></div>
+      <div>Hover dots to see names. Click a dot to switch the institution detail on the right.</div>
+    </div>
+    {% if error %}
+      <div class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{{ error }}</div>
     {% endif %}
-    <div class="panel p-4 space-y-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div class="text-xs uppercase tracking-wide text-slate-500">Institution Profile</div>
-          <h2 class="text-2xl font-semibold">{{ institution.location_name or "-" }}</h2>
-          <div class="text-sm text-slate-500">{{ institution.city or "-" }}, {{ institution.state or "-" }}</div>
-        </div>
-        <div class="flex items-center gap-2 flex-wrap">
-          {% if my_status == "served" %}
-            <span class="rounded-full bg-emerald-100 text-emerald-700 px-2 py-1 text-xs font-semibold">Added as Served</span>
-          {% elif my_status == "prospect" %}
-            <span class="rounded-full bg-amber-100 text-amber-700 px-2 py-1 text-xs font-semibold">Added as Prospect</span>
-          {% else %}
-            <span class="rounded-full bg-slate-100 text-slate-600 px-2 py-1 text-xs font-semibold">Not in My CRM</span>
-          {% endif %}
-          <button type="button" class="btn-ghost text-[11px] px-3 py-2" onclick="markInstitution('prospect')">Add as Prospect</button>
-          <button type="button" class="btn-ghost text-[11px] px-3 py-2" onclick="markInstitution('served')">Add as Served</button>
-          {% set vendor_query = "Gemini, list approved vendors and suppliers for " ~ (institution.location_name or "") ~ " procurement preferred vendors site:.edu" %}
-          {% set events_query = "Gemini, find upcoming events calendar for " ~ (institution.location_name or "") ~ " site:.edu" %}
-          <a class="btn-ghost text-[11px] px-3 py-2" href="https://www.google.com/search?q={{ vendor_query | urlencode }}" target="_blank" rel="noopener">Find Vendors</a>
-          <a class="btn-ghost text-[11px] px-3 py-2" href="https://www.google.com/search?q={{ events_query | urlencode }}" target="_blank" rel="noopener">Upcoming Events</a>
-          {% if website %}
-            <a href="{{ website_href }}" target="_blank" rel="noopener" class="btn-primary text-[11px] px-3 py-2">Visit Website</a>
-          {% endif %}
-          <a href="/institutions" class="btn-ghost text-[11px] px-3 py-2">Back to Institutions</a>
-        </div>
-      </div>
+  </div>
 
-      <div class="flex flex-wrap gap-2 text-xs">
-        {% if institution.control %}<span class="rounded-full bg-blue-50 text-blue-700 px-3 py-1 font-semibold">{{ institution.control }}</span>{% endif %}
-        {% if institution.institution_level %}<span class="rounded-full bg-amber-50 text-amber-700 px-3 py-1 font-semibold">{{ institution.institution_level }}</span>{% endif %}
-        {% if institution.degree_granting_status %}<span class="rounded-full bg-violet-50 text-violet-700 px-3 py-1 font-semibold">{{ institution.degree_granting_status }}</span>{% endif %}
-        {% if institution.locale %}<span class="rounded-full bg-slate-100 text-slate-600 px-3 py-1 font-semibold">{{ institution.locale }}</span>{% endif %}
+  <div class="detail-map-stage">
+    <div class="detail-map-overlay">
+      <div class="detail-map-card">
+        <div class="sidebar-label">National Focus</div>
+        <div class="mt-1 text-sm font-semibold text-[#123d71]">United States institutions with linked campus intelligence</div>
       </div>
-
-      <div class="grid lg:grid-cols-3 gap-3 text-sm">
-        <div class="rounded-xl border border-slate-200 p-3 space-y-1">
-          <div class="text-slate-500 text-xs uppercase">Enrollment</div>
-          <div class="text-base font-semibold">
-            {% if institution.students_total %}{{ "{:,}".format(institution.students_total) }}{% else %}-{% endif %}
-          </div>
-          <div class="text-xs text-slate-500">Total students</div>
-          {% if institution.dorm_capacity %}
-            <div class="text-xs text-slate-500 mt-2">Dorm capacity: {{ "{:,}".format(institution.dorm_capacity) }}</div>
-          {% endif %}
-          {% if institution.acceptance_rate %}
-            <div class="text-xs text-slate-500">
-              Acceptance rate:
-              {% if institution.acceptance_rate > 1 %}
-                {{ institution.acceptance_rate }}%
-              {% else %}
-                {{ (institution.acceptance_rate * 100) | round(1) }}%
-              {% endif %}
-            </div>
-          {% endif %}
+      <div class="flex flex-wrap gap-2">
+        <div class="detail-map-card text-xs text-slate-500">
+          <div class="sidebar-label">Institutions</div>
+          <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.number($store.institutionsExplorer.filteredRows.length)"></div>
         </div>
-        <div class="rounded-xl border border-slate-200 p-3 space-y-1">
-          <div class="text-slate-500 text-xs uppercase">Location</div>
-          <div>{{ institution.address or "-" }}</div>
-          <div>{{ institution.city or "-" }}, {{ institution.state or "-" }} {{ institution.zip or "" }}</div>
-          <div class="text-xs text-slate-500">Phone: {{ institution.general_phone or "-" }}</div>
-          <div class="text-xs text-slate-500">Fax: {{ institution.fax or "-" }}</div>
-        </div>
-        <div class="rounded-xl border border-slate-200 p-3 space-y-1">
-          <div class="text-slate-500 text-xs uppercase">Admin Contact</div>
-          <div>{{ institution.admin_name or "-" }}</div>
-          <div class="text-xs text-slate-500">Phone: {{ institution.admin_phone or "-" }}</div>
-          <div class="text-xs text-slate-500">Email: {{ institution.admin_email or "-" }}</div>
+        <div class="detail-map-card text-xs text-slate-500">
+          <div class="sidebar-label">States</div>
+          <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.number($store.institutionsExplorer.stateCount())"></div>
         </div>
       </div>
     </div>
-    <div class="panel p-4">
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="font-semibold">Chapters at this Institution</h3>
-        <div class="text-xs text-slate-500">{{ chapters|length }} shown</div>
-      </div>
-      {% if chapters and chapters|length > 0 %}
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="table-head text-xs uppercase text-slate-500">
-              <tr>
-                <th class="text-left px-3 py-2">Organization</th>
-                <th class="text-left px-3 py-2">Chapter</th>
-                <th class="text-left px-3 py-2">Status</th>
-                <th class="text-left px-3 py-2">City / State</th>
-                <th class="text-left px-3 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for chapter in chapters %}
-                <tr class="border-b border-slate-100">
-                  <td class="px-3 py-2">{{ chapter.organization or "-" }}</td>
-                  <td class="px-3 py-2 font-medium">{{ chapter.chapter_name or "-" }}</td>
-                  <td class="px-3 py-2">{{ chapter.status or "-" }}</td>
-                  <td class="px-3 py-2">{{ chapter.city or "-" }}, {{ chapter.state or "-" }}</td>
-                  <td class="px-3 py-2">
-                    <a href="/chapters/{{ chapter.chapter_uid | urlencode }}" class="text-blue-700 hover:underline text-xs">Open</a>
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% else %}
-        <div class="text-sm text-slate-500">No chapters matched this institution yet.</div>
-      {% endif %}
-    </div>
-  {% endif %}
+    <div id="institutions-detail-map"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block context_panel %}
-<aside class="panel p-4 space-y-3">
-  <h3 class="font-semibold">Institution IDs</h3>
-  <dl class="grid grid-cols-[130px_1fr] gap-x-3 gap-y-1 text-sm">
-    <dt class="text-slate-500">DAPIP ID</dt><dd>{{ institution.dapip_id or "-" }}</dd>
-    <dt class="text-slate-500">OPE ID</dt><dd>{{ institution.ope_id or "-" }}</dd>
-    <dt class="text-slate-500">IPEDS</dt><dd>{{ institution.ipeds_unit_ids or "-" }}</dd>
-    <dt class="text-slate-500">UNITID</dt><dd>{{ institution.unitid or "-" }}</dd>
-    <dt class="text-slate-500">Parent DAPIP</dt><dd>{{ institution.parent_dapip_id or "-" }}</dd>
-    <dt class="text-slate-500">Institution ID</dt><dd>{{ institution.institution_id or "-" }}</dd>
-    <dt class="text-slate-500">Updated</dt><dd>{{ institution.update_date or "-" }}</dd>
-  </dl>
-  <h3 class="font-semibold">Accreditation Details</h3>
-  <dl class="grid grid-cols-[160px_1fr] gap-x-3 gap-y-1 text-sm">
-    <dt class="text-slate-500">Alias</dt><dd>{{ institution.alias or "-" }}</dd>
-    <dt class="text-slate-500">Website</dt><dd>{{ institution.website or "-" }}</dd>
-    <dt class="text-slate-500">Telephone</dt><dd>{{ institution.telephone or "-" }}</dd>
-    <dt class="text-slate-500">EIN</dt><dd>{{ institution.ein or "-" }}</dd>
-    <dt class="text-slate-500">Institution Level</dt><dd>{{ institution.institution_level or "-" }}</dd>
-    <dt class="text-slate-500">Control</dt><dd>{{ institution.control or "-" }}</dd>
-    <dt class="text-slate-500">Highest Offering</dt><dd>{{ institution.highest_offering or "-" }}</dd>
-    <dt class="text-slate-500">UG Offering</dt><dd>{{ institution.ug_offering or "-" }}</dd>
-    <dt class="text-slate-500">Grad Offering</dt><dd>{{ institution.grad_offering or "-" }}</dd>
-    <dt class="text-slate-500">Degree Status</dt><dd>{{ institution.degree_granting_status or "-" }}</dd>
-    <dt class="text-slate-500">Locale</dt><dd>{{ institution.locale or "-" }}</dd>
-    <dt class="text-slate-500">Student Total</dt><dd>{{ institution.students_total or "-" }}</dd>
-    <dt class="text-slate-500">Dorm Capacity</dt><dd>{{ institution.dorm_capacity or "-" }}</dd>
-    <dt class="text-slate-500">Acceptance Rate</dt><dd>{{ institution.acceptance_rate or "-" }}</dd>
-    <dt class="text-slate-500">Public Status</dt><dd>{{ institution.public_status or "-" }}</dd>
-    <dt class="text-slate-500">Post Secondary</dt><dd>{{ institution.post_secondary_status or "-" }}</dd>
-    <dt class="text-slate-500">County</dt><dd>{{ institution.county or "-" }}</dd>
-    <dt class="text-slate-500">FIPS State</dt><dd>{{ institution.fips_state_code or "-" }}</dd>
-    <dt class="text-slate-500">FIPS County</dt><dd>{{ institution.fips_county_code or "-" }}</dd>
-    <dt class="text-slate-500">Congress Dist</dt><dd>{{ institution.congressional_district or "-" }}</dd>
-    <dt class="text-slate-500">Longitude</dt><dd>{{ institution.longitude or "-" }}</dd>
-    <dt class="text-slate-500">Latitude</dt><dd>{{ institution.latitude or "-" }}</dd>
-  </dl>
+<aside x-data x-init="$store.institutionsExplorer.init()" class="panel h-full min-h-0 overflow-hidden xl:sticky xl:top-6 self-start">
+  <div class="sidebar-scroll p-4 space-y-4">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <div class="sidebar-label">Selected Institution</div>
+        <div class="mt-1 text-2xl font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.selectedInstitutionName()"></div>
+        <div class="mt-1 text-sm text-slate-500" x-text="$store.institutionsExplorer.selectedInstitutionLocation()"></div>
+      </div>
+      <div class="rounded-full px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide" :class="$store.institutionsExplorer.selectedStatusClass()" x-text="$store.institutionsExplorer.selectedStatusLabel()"></div>
+    </div>
+
+    <div x-show="$store.institutionsExplorer.detailLoading" class="space-y-2">
+      <div class="h-4 w-40 animate-pulse rounded bg-slate-200"></div>
+      <div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
+      <div class="h-24 animate-pulse rounded-2xl bg-slate-100"></div>
+    </div>
+
+    <template x-if="!$store.institutionsExplorer.detailLoading && !$store.institutionsExplorer.selectedInstitution()">
+      <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-sm text-slate-500">
+        Select a campus from the map to load the full institution dossier here.
+      </div>
+    </template>
+
+    <div x-show="$store.institutionsExplorer.selectedInstitution()" x-cloak class="space-y-4">
+      <div class="grid grid-cols-2 gap-2">
+        <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+          <div class="text-[10px] uppercase tracking-[0.16em] text-slate-500">Students</div>
+          <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.number($store.institutionsExplorer.selectedInstitution()?.students_total)"></div>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+          <div class="text-[10px] uppercase tracking-[0.16em] text-slate-500">Acceptance</div>
+          <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.formatPercent($store.institutionsExplorer.selectedInstitution()?.acceptance_rate)"></div>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+          <div class="text-[10px] uppercase tracking-[0.16em] text-slate-500">Chapters</div>
+          <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.number($store.institutionsExplorer.selectedInstitution()?.chapter_count)"></div>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+          <div class="text-[10px] uppercase tracking-[0.16em] text-slate-500">Organizations</div>
+          <div class="mt-1 text-lg font-extrabold text-[#123d71]" x-text="$store.institutionsExplorer.number($store.institutionsExplorer.selectedInstitution()?.organization_count)"></div>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-1 text-[11px]">
+        <template x-for="tag in $store.institutionsExplorer.selectedTags()" :key="tag.value">
+          <span class="rounded-full px-2.5 py-1 font-semibold" :class="tag.tone" x-text="tag.value"></span>
+        </template>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="btn-ghost px-3 py-2 text-[11px]" @click="$store.institutionsExplorer.markInstitution('prospect')">Add as Prospect</button>
+        <button type="button" class="btn-ghost px-3 py-2 text-[11px]" @click="$store.institutionsExplorer.markInstitution('served')">Add as Served</button>
+        <a class="btn-primary px-3 py-2 text-[11px]" :href="$store.institutionsExplorer.selectedProfileUrl()">Open Full Profile</a>
+        <a class="btn-ghost px-3 py-2 text-[11px]" :href="$store.institutionsExplorer.selectedResearchUrl()" target="_blank" rel="noopener">Research</a>
+        <a x-show="$store.institutionsExplorer.selectedWebsiteHref()" class="btn-ghost px-3 py-2 text-[11px]" :href="$store.institutionsExplorer.selectedWebsiteHref()" target="_blank" rel="noopener">Visit Website</a>
+      </div>
+
+      <div class="space-y-2">
+        <div class="sidebar-label">Institution Snapshot</div>
+        <dl class="grid grid-cols-[118px_1fr] gap-x-3 gap-y-2 text-sm">
+          <dt class="text-slate-500">Address</dt><dd x-text="$store.institutionsExplorer.selectedAddress()"></dd>
+          <dt class="text-slate-500">Phone</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.general_phone || $store.institutionsExplorer.selectedInstitution()?.telephone || '-'"></dd>
+          <dt class="text-slate-500">Fax</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.fax || '-'"></dd>
+          <dt class="text-slate-500">Admin</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.admin_name || '-'"></dd>
+          <dt class="text-slate-500">Admin Phone</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.admin_phone || '-'"></dd>
+          <dt class="text-slate-500">Admin Email</dt><dd class="break-all" x-text="$store.institutionsExplorer.selectedInstitution()?.admin_email || '-'"></dd>
+        </dl>
+      </div>
+
+      <div class="space-y-2">
+        <div class="sidebar-label">Institution IDs</div>
+        <dl class="grid grid-cols-[118px_1fr] gap-x-3 gap-y-2 text-sm">
+          <dt class="text-slate-500">DAPIP ID</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.dapip_id || '-'"></dd>
+          <dt class="text-slate-500">OPE ID</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.ope_id || '-'"></dd>
+          <dt class="text-slate-500">IPEDS</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.ipeds_unit_ids || '-'"></dd>
+          <dt class="text-slate-500">UNITID</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.unitid || '-'"></dd>
+          <dt class="text-slate-500">Parent DAPIP</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.parent_dapip_id || '-'"></dd>
+          <dt class="text-slate-500">Institution ID</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.institution_id || '-'"></dd>
+          <dt class="text-slate-500">Updated</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.update_date || '-'"></dd>
+        </dl>
+      </div>
+
+      <div class="space-y-2">
+        <div class="sidebar-label">Accreditation Details</div>
+        <dl class="grid grid-cols-[132px_1fr] gap-x-3 gap-y-2 text-sm">
+          <dt class="text-slate-500">Alias</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.alias || '-'"></dd>
+          <dt class="text-slate-500">Website</dt><dd class="break-all" x-text="$store.institutionsExplorer.selectedInstitution()?.website || '-'"></dd>
+          <dt class="text-slate-500">Telephone</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.telephone || '-'"></dd>
+          <dt class="text-slate-500">EIN</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.ein || '-'"></dd>
+          <dt class="text-slate-500">Level</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.institution_level || '-'"></dd>
+          <dt class="text-slate-500">Control</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.control || '-'"></dd>
+          <dt class="text-slate-500">Highest Offering</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.highest_offering || '-'"></dd>
+          <dt class="text-slate-500">UG Offering</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.ug_offering || '-'"></dd>
+          <dt class="text-slate-500">Grad Offering</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.grad_offering || '-'"></dd>
+          <dt class="text-slate-500">Degree Status</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.degree_granting_status || '-'"></dd>
+          <dt class="text-slate-500">Locale</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.locale || '-'"></dd>
+          <dt class="text-slate-500">Student Total</dt><dd x-text="$store.institutionsExplorer.number($store.institutionsExplorer.selectedInstitution()?.students_total)"></dd>
+          <dt class="text-slate-500">Dorm Capacity</dt><dd x-text="$store.institutionsExplorer.number($store.institutionsExplorer.selectedInstitution()?.dorm_capacity)"></dd>
+          <dt class="text-slate-500">Acceptance Rate</dt><dd x-text="$store.institutionsExplorer.formatPercent($store.institutionsExplorer.selectedInstitution()?.acceptance_rate)"></dd>
+          <dt class="text-slate-500">Public Status</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.public_status || '-'"></dd>
+          <dt class="text-slate-500">Post Secondary</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.post_secondary_status || '-'"></dd>
+          <dt class="text-slate-500">County</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.county || '-'"></dd>
+          <dt class="text-slate-500">FIPS State</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.fips_state_code || '-'"></dd>
+          <dt class="text-slate-500">FIPS County</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.fips_county_code || '-'"></dd>
+          <dt class="text-slate-500">Congress Dist</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.congressional_district || '-'"></dd>
+          <dt class="text-slate-500">Longitude</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.longitude || '-'"></dd>
+          <dt class="text-slate-500">Latitude</dt><dd x-text="$store.institutionsExplorer.selectedInstitution()?.latitude || '-'"></dd>
+        </dl>
+      </div>
+
+      <div class="space-y-2">
+        <div class="flex items-center justify-between gap-2">
+          <div class="sidebar-label">Chapters At This Institution</div>
+          <div class="text-xs text-slate-500" x-text="`${$store.institutionsExplorer.selectedChapters().length} linked`"></div>
+        </div>
+        <div x-show="!$store.institutionsExplorer.selectedChapters().length" class="rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-4 text-sm text-slate-500">
+          No chapters are matched to this institution yet.
+        </div>
+        <div x-show="$store.institutionsExplorer.selectedChapters().length" class="chapter-list-scroll space-y-2">
+          <template x-for="chapter in $store.institutionsExplorer.selectedChapters()" :key="chapter.chapter_uid">
+            <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="text-sm font-semibold text-[#123d71]" x-text="chapter.chapter_name || '-'"></div>
+                  <div class="text-xs text-slate-500" x-text="chapter.organization || '-'"></div>
+                </div>
+                <span class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600" x-text="chapter.status || 'Unknown'"></span>
+              </div>
+              <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500">
+                <div x-text="`${chapter.city || '-'}${chapter.state ? ', ' + chapter.state : ''}`"></div>
+                <a class="text-blue-700 hover:underline font-semibold" :href="`/chapters/${encodeURIComponent(chapter.chapter_uid)}`">Open</a>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
 </aside>
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
-async function markInstitution(action){
-  const payload = {
-    institution_id: {{ institution.id|default(None)|tojson }},
-    institution_name: {{ institution.location_name|default('')|tojson }},
-    city: {{ institution.city|default('')|tojson }},
-    state: {{ institution.state|default('')|tojson }},
-    action: action
-  };
-  const resp = await fetch("/api/m/crm/add-institution", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(payload)
-  });
-  const out = await resp.json();
-  if(!out.ok){
-    (window.appToast || alert)(out.error || "Failed to update CRM", "error");
-    return;
-  }
-  location.reload();
-}
-</script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="{{ url_for('static', filename='institutions_explorer.js') }}"></script>
+  <script>
+    document.addEventListener("alpine:init", () => {
+      Alpine.store("institutionsExplorer", window.createInstitutionExplorerStore({
+        mode: "detail",
+        mapElementId: "institutions-detail-map",
+        navigateMapClicks: false,
+        initialInstitutionId: Number({{ request.args.get("institution_id", institution.id if institution else "")|tojson }}) || null,
+        initialTheme: "carto_light",
+        initialFilters: {
+          search: {{ request.args.get("q", "")|tojson }},
+          state: {{ request.args.get("state", "")|tojson }},
+          control: {{ request.args.get("control", "")|tojson }},
+          institution_level: {{ request.args.get("institution_level", "")|tojson }},
+        }
+      }));
+    });
+  </script>
 {% endblock %}

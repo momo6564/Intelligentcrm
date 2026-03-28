@@ -4,7 +4,7 @@ import uuid
 
 from app import create_app
 from app.config import Config
-from app.database import get_connection, ensure_crm_tables
+from app.database import get_connection, ensure_crm_tables, ensure_institutions_table, ensure_chapters_table
 
 
 class AppTests(unittest.TestCase):
@@ -77,6 +77,127 @@ class AppTests(unittest.TestCase):
         anon = self.app.test_client()
         resp = anon.get("/api/m/chapters")
         self.assertEqual(resp.status_code, 401)
+
+    def test_institutions_map_api_and_detail_endpoint(self):
+        with self.app.app_context():
+            conn = get_connection()
+            ensure_institutions_table(conn)
+            ensure_chapters_table(conn)
+            cur = conn.execute(
+                """
+                INSERT INTO institutions (
+                    location_name, city, state, control, institution_level,
+                    latitude, longitude, website, students_total, acceptance_rate
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "Atlas University",
+                    "Atlanta",
+                    "GA",
+                    "Public Institution",
+                    "4 year",
+                    "33.7490",
+                    "-84.3880",
+                    "atlas.example.edu",
+                    12000,
+                    0.42,
+                ),
+            )
+            institution_id = int(cur.lastrowid)
+            conn.execute(
+                """
+                INSERT INTO chapters (
+                    chapter_uid, institution_id, chapter_name, organization, school, city, state, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "atlas-alpha",
+                    institution_id,
+                    "Alpha Chapter",
+                    "Alpha Phi Alpha",
+                    "Atlas University",
+                    "Atlanta",
+                    "GA",
+                    "Active",
+                ),
+            )
+            conn.commit()
+
+        self._login("demo", "demo123")
+
+        resp = self.client.get("/api/institutions?all=1&include_filters=1&q=Atlas%20University")
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.get_json()
+        self.assertTrue(payload.get("ok"))
+        self.assertGreaterEqual(payload.get("total"), 1)
+        atlas_row = next((row for row in payload.get("results", []) if row.get("id") == institution_id), None)
+        self.assertIsNotNone(atlas_row)
+        self.assertEqual(atlas_row["location_name"], "Atlas University")
+        self.assertAlmostEqual(float(atlas_row["latitude"]), 33.7490, places=4)
+        self.assertIn("states", payload.get("filters", {}))
+
+        detail_resp = self.client.get(f"/api/institutions/{institution_id}")
+        self.assertEqual(detail_resp.status_code, 200)
+        detail_payload = detail_resp.get_json()
+        self.assertTrue(detail_payload.get("ok"))
+        self.assertEqual(detail_payload["institution"]["chapter_count"], 1)
+        self.assertEqual(len(detail_payload.get("chapters", [])), 1)
+        self.assertEqual(detail_payload["chapters"][0]["chapter_uid"], "atlas-alpha")
+
+    def test_dashboard_renders_served_map_for_mappable_institutions(self):
+        with self.app.app_context():
+            conn = get_connection()
+            ensure_institutions_table(conn)
+            cur = conn.execute(
+                """
+                INSERT INTO institutions (
+                    location_name, city, state, control, institution_level,
+                    latitude, longitude, website
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "Beacon University",
+                    "Boston",
+                    "MA",
+                    "Private Institution",
+                    "4 year",
+                    "42.3601",
+                    "-71.0589",
+                    "beacon.example.edu",
+                ),
+            )
+            institution_id = int(cur.lastrowid)
+            conn.commit()
+
+        self._login("demo", "demo123")
+        me = self._me()
+
+        with self.app.app_context():
+            conn = get_connection()
+            conn.execute(
+                """
+                INSERT INTO crm_contacts (workspace_id, name, type, status, connection)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    me["workspace_id"],
+                    "Beacon University",
+                    "school",
+                    "closed",
+                    f"institution:{institution_id}",
+                ),
+            )
+            conn.commit()
+
+        resp = self.client.get("/dashboard")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn("dashboard-served-map", body)
+        self.assertIn("Beacon University", body)
+        self.assertIn("/institutions/detail", body)
 
     def test_login_blocks_open_redirect(self):
         resp = self._login("demo", "demo123", next_path="https://evil.example/path")

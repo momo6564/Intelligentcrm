@@ -2,6 +2,53 @@
 {% block title %}Dashboard{% endblock %}
 {% block page_title %}Dashboard{% endblock %}
 {% block page_subtitle %}Served footprint and clickable detail lists{% endblock %}
+{% block extra_head %}
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <style>
+    .dashboard-map-shell{
+      min-height: 34rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .dashboard-map{
+      height: 27rem;
+      border-radius: 1.25rem;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.45);
+    }
+    .dashboard-map .leaflet-control-zoom a{
+      color: #123d71;
+    }
+    .map-stat{
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: rgba(255,255,255,.72);
+      padding: .85rem .95rem;
+    }
+    .map-legend-dot{
+      width: .8rem;
+      height: .8rem;
+      border-radius: 999px;
+      display: inline-flex;
+      flex: 0 0 auto;
+    }
+    .leaflet-popup-content-wrapper{
+      border-radius: 1rem;
+    }
+    .leaflet-popup-content{
+      margin: .9rem 1rem;
+      color: #123d71;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+    }
+  </style>
+{% endblock %}
 {% block content %}
   {% if error %}
     <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-800">{{ error }}</div>
@@ -135,4 +182,158 @@
       </div>
     </div>
   </div>
+{% endblock %}
+{% block context_panel %}
+  {% set map_stats = namespace(chapter_only=0, institution_only=0, both=0) %}
+  {% for point in served_map_points %}
+    {% if point.has_chapter_service and point.has_institution_service %}
+      {% set map_stats.both = map_stats.both + 1 %}
+    {% elif point.has_chapter_service %}
+      {% set map_stats.chapter_only = map_stats.chapter_only + 1 %}
+    {% elif point.has_institution_service %}
+      {% set map_stats.institution_only = map_stats.institution_only + 1 %}
+    {% endif %}
+  {% endfor %}
+  <aside class="space-y-4 xl:sticky xl:top-24 self-start">
+    <section class="panel p-4 dashboard-map-shell">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="text-xs uppercase tracking-[0.28em] text-slate-500">Served Map</div>
+          <h3 class="mt-2 text-lg font-semibold text-slate-900">Institutions with usable coordinates</h3>
+          <p class="mt-1 text-sm text-slate-500">
+            The map highlights served schools and campus relationships we can place on the United States view.
+          </p>
+        </div>
+        <a href="/institutions/detail" class="btn-ghost whitespace-nowrap">Open Explorer</a>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 text-center text-slate-900">
+        <div class="map-stat">
+          <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">Mapped</div>
+          <div class="mt-2 text-xl font-semibold">{{ served_map_points|length }}</div>
+        </div>
+        <div class="map-stat">
+          <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">Chapter-linked</div>
+          <div class="mt-2 text-xl font-semibold">{{ map_stats.chapter_only + map_stats.both }}</div>
+        </div>
+        <div class="map-stat">
+          <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">Institution-served</div>
+          <div class="mt-2 text-xl font-semibold">{{ map_stats.institution_only + map_stats.both }}</div>
+        </div>
+      </div>
+
+      {% if served_map_points %}
+        <div id="dashboard-served-map" class="dashboard-map" aria-label="Served institutions map"></div>
+        <div class="grid gap-2 text-xs text-slate-500">
+          <div class="flex items-center gap-2">
+            <span class="map-legend-dot" style="background:#7c3aed;"></span>
+            <span>Chapters served and institution relationship tracked</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="map-legend-dot" style="background:#2563eb;"></span>
+            <span>Chapters served</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="map-legend-dot" style="background:#0f9f7f;"></span>
+            <span>Institution relationship tracked</span>
+          </div>
+        </div>
+      {% else %}
+        <div class="dashboard-map flex items-center justify-center bg-white/60 text-center">
+          <div class="max-w-xs space-y-2">
+            <div class="text-sm font-semibold text-slate-900">No mappable served institutions yet</div>
+            <p class="text-sm text-slate-500">
+              Once served schools or institution contacts match campuses with coordinates, they will appear here.
+            </p>
+          </div>
+        </div>
+      {% endif %}
+    </section>
+  </aside>
+{% endblock %}
+{% block extra_scripts %}
+  {% if served_map_points %}
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      (() => {
+        const mapElement = document.getElementById('dashboard-served-map');
+        if (!mapElement || typeof L === 'undefined') return;
+
+        const points = {{ served_map_points | tojson }};
+        const defaultBounds = [[24.25, -125.5], [49.6, -66.5]];
+        const map = L.map(mapElement, {
+          zoomControl: true,
+          scrollWheelZoom: false,
+          maxBounds: [[16, -170], [72, -52]],
+          maxBoundsViscosity: 1
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          minZoom: 3,
+          noWrap: true,
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const colorForPoint = (point) => {
+          if (point.has_chapter_service && point.has_institution_service) return '#7c3aed';
+          if (point.has_chapter_service) return '#2563eb';
+          return '#0f9f7f';
+        };
+
+        const markerBounds = [];
+        points.forEach((point) => {
+          if (typeof point.latitude !== 'number' || typeof point.longitude !== 'number') return;
+          const location = [point.latitude, point.longitude];
+          markerBounds.push(location);
+
+          const marker = L.circleMarker(location, {
+            radius: point.has_chapter_service && point.has_institution_service ? 10 : 8,
+            color: '#0f3566',
+            weight: 2,
+            fillColor: colorForPoint(point),
+            fillOpacity: 0.88
+          }).addTo(map);
+
+          marker.bindTooltip(point.institution_name || 'Institution', {
+            direction: 'top',
+            offset: [0, -8],
+            opacity: 0.96
+          });
+
+          const chapterLine = point.chapter_count
+            ? `<div class="text-xs text-slate-500">Chapters served: ${point.chapter_count} | Organizations: ${point.org_count || 0}</div>`
+            : '<div class="text-xs text-slate-500">Institution relationship tracked</div>';
+          const popupHtml = `
+            <div class="space-y-2">
+              <div>
+                <div class="text-sm font-semibold text-slate-900">${point.institution_name || 'Institution'}</div>
+                <div class="text-xs text-slate-500">${[point.city, point.state].filter(Boolean).join(', ')}</div>
+              </div>
+              ${chapterLine}
+              <a class="text-xs font-semibold text-blue-700" href="/institutions/detail?institution_id=${point.institution_id}">Open institution detail</a>
+            </div>
+          `;
+          marker.bindPopup(popupHtml);
+
+          marker.on('click', () => {
+            window.location.href = `/institutions/detail?institution_id=${point.institution_id}`;
+          });
+        });
+
+        if (markerBounds.length) {
+          map.fitBounds(markerBounds, { padding: [28, 28], maxZoom: 6 });
+        } else {
+          map.fitBounds(defaultBounds);
+        }
+
+        window.addEventListener('resize', () => map.invalidateSize());
+        setTimeout(() => map.invalidateSize(), 140);
+      })();
+    </script>
+  {% endif %}
 {% endblock %}
