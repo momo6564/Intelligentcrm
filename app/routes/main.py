@@ -1,11 +1,10 @@
 import os
 from datetime import date
-from urllib.parse import quote_plus
-from flask import Blueprint, render_template, redirect, url_for
-from ..auth import login_required, get_session_user
+from urllib.parse import quote, quote_plus
+from flask import Blueprint, current_app, render_template, redirect, url_for
+from ..auth import account_type_for_user, is_brand_owner_user, login_required, get_session_user
 from ..config import Config
-from ..database import get_connection, ensure_crm_tables, ensure_institutions_table
-from ..services.dashboard import manufacturer_dashboard_dataset
+from ..database import get_connection, ensure_chapters_table, ensure_crm_tables, ensure_institutions_table, ensure_vendor_table
 from ..utils.text_utils import clean_text
 from ..utils.workspace import workspace_id_for_user
 
@@ -15,10 +14,48 @@ def render_app(template_name: str, **context):
     context.setdefault("me", get_session_user())
     return render_template(template_name, **context)
 
+
+def _landing_asset_name(extension: str) -> str:
+    static_root = current_app.static_folder or ""
+    assets_dir = os.path.join(static_root, "ops_hub", "assets")
+    if not os.path.isdir(assets_dir):
+        return ""
+    matches = sorted(
+        name
+        for name in os.listdir(assets_dir)
+        if name.startswith("index-") and name.endswith(extension)
+    )
+    return matches[0] if matches else ""
+
+
 @bp.route("/")
-@login_required()
 def index():
-    return dashboard_page()
+    user = get_session_user()
+    default_cta_href = url_for("auth.signup_page")
+    login_href = url_for("auth.login_page")
+    if user:
+        default_cta_href = (
+            url_for("brand.brand_dashboard_page")
+            if is_brand_owner_user(user)
+            else url_for("main.dashboard_page")
+        )
+        login_href = default_cta_href
+    landing_css = _landing_asset_name(".css")
+    landing_js = _landing_asset_name(".js")
+    if not landing_css or not landing_js:
+        return redirect(login_href)
+    return render_template(
+        "landing/ops_hub.html",
+        landing_css=landing_css,
+        landing_js=landing_js,
+        landing_links={
+            "login": login_href,
+            "signup": default_cta_href if user else url_for("auth.signup_page"),
+            "get_started": default_cta_href,
+            "start_free": default_cta_href,
+            "track": url_for("ops.ops_customer_track"),
+        },
+    )
 
 @bp.route("/dashboard")
 @login_required()
@@ -38,10 +75,143 @@ def dashboard_page():
         )
     
     user = get_session_user()
+    if is_brand_owner_user(user):
+        return redirect(url_for("brand.brand_dashboard_page"))
     workspace_id = workspace_id_for_user(user)
-    dataset = manufacturer_dashboard_dataset(user, activity_limit=0)
-    chapters_served = dataset.get("chapters_served", [])
-    vendors_served = dataset.get("vendors_served", [])
+    conn = get_connection()
+    ensure_crm_tables(conn)
+    ensure_chapters_table(conn)
+    ensure_institutions_table(conn)
+    ensure_vendor_table(conn)
+    chapter_contact_rows = conn.execute(
+        """
+        SELECT c.chapter_id, c.name, c.connection, c.created_at, ch.school, ch.city, ch.state
+        FROM crm_contacts c
+        LEFT JOIN chapters ch ON ch.chapter_uid=c.chapter_id
+        WHERE c.workspace_id=?
+          AND lower(coalesce(c.type,''))='chapter'
+          AND lower(coalesce(c.status,''))='closed'
+        ORDER BY c.created_at DESC, c.id DESC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    order_rows = conn.execute(
+        """
+        SELECT chapter_id, chapter_name, org, school, city, state, vendor, created_at
+        FROM vendor_orders
+        WHERE workspace_id=?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    chapter_map = {}
+    for row in chapter_contact_rows:
+        chapter_id = clean_text(row["chapter_id"])
+        name = clean_text(row["name"])
+        key = chapter_id or f"name::{name.lower()}"
+        if not key:
+            continue
+        chapter_map.setdefault(
+            key,
+            {
+                "chapter_id": chapter_id,
+                "name": name,
+                "org": clean_text(row["connection"]),
+                "school": clean_text(row["school"]),
+                "city": clean_text(row["city"]),
+                "state": clean_text(row["state"]),
+                "added_at": clean_text(row["created_at"]),
+            },
+        )
+    for row in order_rows:
+        chapter_id = clean_text(row["chapter_id"])
+        name = clean_text(row["chapter_name"])
+        key = chapter_id or f"name::{name.lower()}"
+        if not key:
+            continue
+        chapter_map.setdefault(
+            key,
+            {
+                "chapter_id": chapter_id,
+                "name": name,
+                "org": clean_text(row["org"]),
+                "school": clean_text(row["school"]),
+                "city": clean_text(row["city"]),
+                "state": clean_text(row["state"]),
+                "added_at": clean_text(row["created_at"]),
+            },
+        )
+    chapters_served = sorted(
+        [
+            {
+                **rec,
+                "location": ", ".join(part for part in [clean_text(rec.get("city")), clean_text(rec.get("state"))] if part),
+                "encodedId": quote(clean_text(rec.get("chapter_id")), safe="") if clean_text(rec.get("chapter_id")) else "",
+            }
+            for rec in chapter_map.values()
+        ],
+        key=lambda r: (clean_text(r.get("added_at")), clean_text(r.get("name"))),
+        reverse=True,
+    )
+    closed_vendor_rows = conn.execute(
+        """
+        SELECT c.name, c.connection, c.created_at, v.id AS vendor_id, v.category, v.state, v.city, v.website, v.email
+        FROM crm_contacts c
+        LEFT JOIN vendors v ON lower(v.vendor)=lower(c.name)
+        WHERE c.workspace_id=?
+          AND lower(coalesce(c.type,''))='vendor'
+          AND lower(coalesce(c.status,''))='closed'
+        ORDER BY c.created_at DESC, c.id DESC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    vendor_map = {}
+    for row in closed_vendor_rows:
+        name = clean_text(row["name"])
+        key = name.lower()
+        if not key:
+            continue
+        vendor_map.setdefault(
+            key,
+            {
+                "vendor_id": int(row["vendor_id"]) if row["vendor_id"] is not None else None,
+                "name": name,
+                "org": clean_text(row["connection"]),
+                "products": clean_text(row["category"]),
+                "state": clean_text(row["state"]),
+                "city": clean_text(row["city"]),
+                "website": clean_text(row["website"]),
+                "email": clean_text(row["email"]),
+                "added_at": clean_text(row["created_at"]),
+            },
+        )
+    for row in order_rows:
+        name = clean_text(row["vendor"])
+        key = name.lower()
+        if not key:
+            continue
+        vendor_map.setdefault(
+            key,
+            {
+                "vendor_id": None,
+                "name": name,
+                "org": clean_text(row["org"]),
+                "products": "",
+                "state": clean_text(row["state"]),
+                "city": clean_text(row["city"]),
+                "website": "",
+                "email": "",
+                "added_at": clean_text(row["created_at"]),
+            },
+        )
+    vendors_served = sorted(
+        [
+            {**rec, "location": ", ".join(part for part in [clean_text(rec.get("city")), clean_text(rec.get("state"))] if part)}
+            for rec in vendor_map.values()
+        ],
+        key=lambda r: (clean_text(r.get("added_at")), clean_text(r.get("name"))),
+        reverse=True,
+    )
 
     school_map = {}
     for row in chapters_served:
@@ -106,9 +276,6 @@ def dashboard_page():
             else f"/vendors/detail?vendor_name={quote_plus(clean_text(row.get('name')))}"
         )
 
-    conn = get_connection()
-    ensure_crm_tables(conn)
-    ensure_institutions_table(conn)
     today = date.today().isoformat()
     follow_up_rows = conn.execute(
         """

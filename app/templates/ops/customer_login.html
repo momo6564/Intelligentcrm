@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Track Your Order</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family:"Manrope","Segoe UI",sans-serif;
+      color:#16345e;
+      background:
+        radial-gradient(60rem 28rem at -10% -15%, rgba(73,149,255,.30), transparent 45%),
+        radial-gradient(62rem 30rem at 110% 8%, rgba(115,192,255,.28), transparent 46%),
+        linear-gradient(180deg, #f4f9ff, #eaf4ff);
+      display:grid;
+      place-items:center;
+      padding:18px;
+    }
+    .card{
+      width:min(480px, 96vw);
+      background:linear-gradient(180deg, #ffffff, #f8fbff);
+      border:1px solid #c8dbfb;
+      border-radius:24px;
+      padding:24px;
+      box-shadow:0 24px 48px rgba(29,74,147,.14);
+      display:grid;
+      gap:14px;
+    }
+    h1{ margin:0; font-size:1.5rem; }
+    p{ margin:0; color:#55739f; line-height:1.5; }
+    input{
+      width:100%;
+      border:1px solid #bdd5fb;
+      border-radius:14px;
+      padding:12px 14px;
+      font:inherit;
+      letter-spacing:.18em;
+      text-transform:uppercase;
+      box-sizing:border-box;
+    }
+    button{
+      border:1px solid #2d7cff;
+      background:linear-gradient(180deg, #2d7cff, #1760e6);
+      color:#fff;
+      border-radius:14px;
+      padding:12px 14px;
+      font:inherit;
+      font-weight:800;
+      cursor:pointer;
+    }
+    .error{
+      border:1px solid #ffc9d5;
+      background:#fff2f6;
+      color:#b03756;
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:.9rem;
+    }
+    .help{
+      border:1px solid #d7e6ff;
+      background:#f2f7ff;
+      border-radius:14px;
+      padding:12px;
+      font-size:.92rem;
+      color:#52709d;
+    }
+    a{ color:#165fd6; font-weight:700; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <form method="post" class="card">
+    <h1>Track Your Order</h1>
+    <p>Enter the access code shared by your manufacturer to see the latest status, recent updates, and message thread.</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <input name="access_code" placeholder="Access code" autocomplete="one-time-code" required>
+    <button type="submit">Open Tracker</button>
+    <div class="help">
+      Need the code again? Ask your manufacturer. Team members can find it inside the order details page.
+      <div style="margin-top:8px;"><a href="/login">Internal team login</a></div>
+    </div>
+  </form>
+</body>
+</html>

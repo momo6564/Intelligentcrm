@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Customer Order Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family:"Manrope","Segoe UI",sans-serif;
+      color:#14345d;
+      background:
+        radial-gradient(62rem 30rem at -10% -15%, rgba(73,149,255,.26), transparent 45%),
+        radial-gradient(60rem 28rem at 112% 8%, rgba(120,196,255,.24), transparent 45%),
+        linear-gradient(180deg, #f5f9ff, #ebf4ff);
+      padding:18px;
+    }
+    .wrap{ max-width:1100px; margin:0 auto; display:grid; gap:16px; }
+    .hero, .panel{
+      background:linear-gradient(180deg, rgba(255,255,255,.98), rgba(245,250,255,.98));
+      border:1px solid #cfe0fb;
+      border-radius:22px;
+      box-shadow:0 18px 38px rgba(28,72,145,.12);
+    }
+    .hero{ padding:22px; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+    .grid{ display:grid; gap:16px; grid-template-columns:1.2fr .8fr; }
+    .panel{ padding:18px; }
+    .kpis{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px; }
+    .kpi{ border:1px solid #d6e5ff; border-radius:16px; background:#fff; padding:14px; }
+    .stage{ border:1px solid #d7e5ff; border-radius:16px; background:#fff; padding:14px; }
+    .message{ border:1px solid #d7e5ff; border-radius:16px; background:#fff; padding:12px; }
+    .floating-chat{
+      position:fixed;
+      right:18px;
+      bottom:18px;
+      z-index:50;
+      display:grid;
+      justify-items:end;
+      gap:10px;
+    }
+    .floating-chat button.chat-trigger{
+      min-width:64px;
+      min-height:64px;
+      border-radius:999px;
+      box-shadow:0 18px 34px rgba(20,52,93,.28);
+      position:relative;
+    }
+    .chat-panel{
+      width:min(360px, calc(100vw - 24px));
+      border:1px solid #cfe0fb;
+      border-radius:20px;
+      background:#fff;
+      box-shadow:0 24px 48px rgba(20,52,93,.18);
+      overflow:hidden;
+    }
+    .chat-badge{
+      position:absolute;
+      top:-4px;
+      right:-4px;
+      min-width:24px;
+      min-height:24px;
+      border-radius:999px;
+      background:#d92d55;
+      color:#fff;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:.75rem;
+      font-weight:800;
+      padding:0 6px;
+    }
+    textarea, button{
+      font:inherit;
+      border-radius:14px;
+      box-sizing:border-box;
+    }
+    textarea{
+      width:100%;
+      min-height:96px;
+      border:1px solid #bdd5fb;
+      padding:12px 14px;
+      resize:vertical;
+    }
+    button{
+      border:1px solid #2d7cff;
+      background:linear-gradient(180deg, #2d7cff, #1760e6);
+      color:#fff;
+      padding:11px 14px;
+      font-weight:800;
+      cursor:pointer;
+    }
+    .muted{ color:#5b78a1; }
+    .badge{
+      display:inline-flex;
+      border-radius:999px;
+      padding:4px 10px;
+      font-size:.8rem;
+      font-weight:700;
+    }
+    .b-complete{ background:#e8fbf4; color:#0f7a5f; }
+    .b-progress{ background:#ebf3ff; color:#1a63d7; }
+    .b-pending{ background:#fff5e8; color:#ba6d17; }
+    .b-blocked{ background:#fff1f4; color:#b03957; }
+    @media (max-width: 900px){
+      .grid{ grid-template-columns:1fr; }
+      .kpis{ grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap" x-data x-init="$store.customerTracker.load()">
+    <div class="hero">
+      <div>
+        <div class="muted" style="text-transform:uppercase;font-size:.78rem;font-weight:800;">Customer Tracker</div>
+        <h1 style="margin:.3rem 0 0 0;font-size:1.7rem;" x-text="$store.customerTracker.order.order_number || 'Order'"></h1>
+        <div class="muted" x-text="$store.customerTracker.order.title || ''"></div>
+        <div class="muted" style="margin-top:.4rem;" x-text="`Customer: ${$store.customerTracker.order.customer_name || $store.customerTracker.order.client_name || '-'}`"></div>
+      </div>
+      <div style="text-align:right;">
+        <div class="muted">Current stage</div>
+        <div style="font-size:1.2rem;font-weight:800;" x-text="$store.customerTracker.order.current_stage_name || '-'"></div>
+        <div class="muted" x-text="`Revised delivery: ${$store.customerTracker.order.revised_ship_date || $store.customerTracker.order.planned_ship_date || $store.customerTracker.order.requested_delivery_date || '-'}`"></div>
+        <div style="margin-top:10px;"><a href="/ops/track/logout" style="color:#165fd6;font-weight:700;text-decoration:none;">Use another code</a></div>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="muted" style="text-transform:uppercase;font-size:.75rem;">Latest update</div>
+        <div style="font-weight:800;margin-top:4px;" x-text="$store.customerTracker.order.last_update_summary || 'No update yet'"></div>
+      </div>
+      <div class="kpi">
+        <div class="muted" style="text-transform:uppercase;font-size:.75rem;">Delay status</div>
+        <div style="font-weight:800;margin-top:4px;" x-text="$store.customerTracker.order.delay_reason || 'On track'"></div>
+      </div>
+      <div class="kpi">
+        <div class="muted" style="text-transform:uppercase;font-size:.75rem;">Messages</div>
+        <div style="font-weight:800;margin-top:4px;" x-text="$store.customerTracker.unreadMessages || 0"></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <div class="muted" style="text-transform:uppercase;font-size:.75rem;font-weight:800;">Progress</div>
+        <div style="margin-top:12px;display:grid;gap:10px;">
+          <template x-for="stage in $store.customerTracker.stages" :key="stage.id">
+            <div class="stage">
+              <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+                <div style="font-weight:800;" x-text="stage.stage_name"></div>
+                <span class="badge"
+                      :class="$store.customerTracker.badgeClass(stage.status)"
+                      x-text="$store.customerTracker.labelStatus(stage.status)"></span>
+              </div>
+              <div class="muted" style="margin-top:6px;" x-text="`Planned: ${stage.planned_start_date || '-'} -> ${stage.revised_end_date || stage.planned_end_date || '-'}`"></div>
+              <div class="muted" x-show="stage.delay_reason" x-text="stage.delay_reason"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div style="display:grid;gap:16px;">
+        <div class="panel">
+          <div class="muted" style="text-transform:uppercase;font-size:.75rem;font-weight:800;">Customer Updates</div>
+          <div style="margin-top:12px;display:grid;gap:10px;">
+            <template x-for="row in $store.customerTracker.updates" :key="row.id">
+              <div class="stage">
+                <div style="font-weight:800;" x-text="row.summary"></div>
+                <div class="muted" style="margin-top:6px;" x-text="row.completed_today || ''"></div>
+                <div class="muted" x-text="`${row.update_date || '-'} | Next: ${row.next_step || '-'}`"></div>
+              </div>
+            </template>
+            <div class="muted" x-show="$store.customerTracker.updates.length===0">No customer-facing updates yet.</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="muted" style="text-transform:uppercase;font-size:.75rem;font-weight:800;">Message Manufacturer</div>
+          <div style="margin-top:12px;display:grid;gap:10px;">
+            <div style="display:grid;gap:10px;max-height:260px;overflow:auto;">
+              <template x-for="row in $store.customerTracker.messages" :key="row.id">
+                <div class="message">
+                  <div style="display:flex;justify-content:space-between;gap:10px;">
+                    <div style="font-weight:800;" x-text="row.author_name || row.author_role"></div>
+                    <div class="muted" x-text="row.created_at"></div>
+                  </div>
+                  <div style="margin-top:6px;" x-text="row.message"></div>
+                </div>
+              </template>
+            </div>
+            <textarea x-model="$store.customerTracker.newMessage" placeholder="Ask for an update, request clarification, or report an issue."></textarea>
+            <button type="button" @click="$store.customerTracker.sendMessage()">Send Message</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="floating-chat" x-show="$store.customerTracker.order.id">
+      <div class="chat-panel" x-show="$store.customerTracker.messagePanelOpen">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:14px 16px;border-bottom:1px solid #e6eefb;">
+          <div>
+            <div class="muted" style="text-transform:uppercase;font-size:.72rem;font-weight:800;">Messages</div>
+            <div style="font-weight:800;" x-text="$store.customerTracker.order.order_number || 'Order chat'"></div>
+          </div>
+          <button type="button" @click="$store.customerTracker.closeMessages()" style="padding:8px 12px;background:#fff;color:#14345d;border:1px solid #d7e5ff;">Close</button>
+        </div>
+        <div style="padding:14px 16px;display:grid;gap:10px;max-height:300px;overflow:auto;">
+          <template x-for="row in $store.customerTracker.messages" :key="`floating-${row.id}`">
+            <div class="message">
+              <div style="display:flex;justify-content:space-between;gap:10px;">
+                <div style="font-weight:800;" x-text="row.author_name || row.author_role"></div>
+                <div class="muted" x-text="row.created_at"></div>
+              </div>
+              <div style="margin-top:6px;" x-text="row.message"></div>
+            </div>
+          </template>
+          <div class="muted" x-show="$store.customerTracker.messages.length===0">No messages yet.</div>
+        </div>
+        <div style="padding:14px 16px;border-top:1px solid #e6eefb;display:grid;gap:10px;">
+          <textarea x-model="$store.customerTracker.newMessage" placeholder="Ask for an update, request clarification, or report an issue."></textarea>
+          <button type="button" @click="$store.customerTracker.sendMessage()">Send Message</button>
+        </div>
+      </div>
+      <button type="button" class="chat-trigger" @click="$store.customerTracker.toggleMessages()">
+        Chat
+        <span class="chat-badge" x-show="$store.customerTracker.unreadMessages > 0" x-text="$store.customerTracker.unreadMessages"></span>
+      </button>
+    </div>
+  </div>
+
+  <script>
+  document.addEventListener("alpine:init", () => {
+    Alpine.store("customerTracker", {
+      order:{},
+      stages:[],
+      updates:[],
+      messages:[],
+      issues:[],
+      newMessage:"",
+      messagePanelOpen:false,
+      unreadMessages:0,
+      labelStatus(status){
+        const s = String(status || "").toLowerCase();
+        if(s==="completed") return "Completed";
+        if(s==="in_progress") return "In progress";
+        if(s==="blocked") return "Blocked";
+        return "Pending";
+      },
+      lastSeenKey(){
+        return this.order.id ? `ops-customer-message-seen-${this.order.id}` : "";
+      },
+      syncUnread(){
+        if(!this.order.id){
+          this.unreadMessages = 0;
+          return;
+        }
+        const seenId = Number(window.localStorage.getItem(this.lastSeenKey()) || 0);
+        this.unreadMessages = (this.messages || []).filter((row) => Number(row.id || 0) > seenId).length;
+        if(this.messagePanelOpen){
+          this.markMessagesSeen();
+        }
+      },
+      markMessagesSeen(){
+        if(!this.order.id){
+          this.unreadMessages = 0;
+          return;
+        }
+        const latestId = Math.max(0, ...(this.messages || []).map((row) => Number(row.id || 0)));
+        window.localStorage.setItem(this.lastSeenKey(), String(latestId));
+        this.unreadMessages = 0;
+      },
+      toggleMessages(){
+        this.messagePanelOpen = !this.messagePanelOpen;
+        if(this.messagePanelOpen){
+          this.markMessagesSeen();
+        }
+      },
+      closeMessages(){
+        this.messagePanelOpen = false;
+      },
+      badgeClass(status){
+        const s = String(status || "").toLowerCase();
+        if(s==="completed") return "b-complete";
+        if(s==="in_progress") return "b-progress";
+        if(s==="blocked") return "b-blocked";
+        return "b-pending";
+      },
+      async load(){
+        const out = await fetch("/api/ops/customer/order").then(r=>r.json());
+        if(!out.ok){
+          window.location.href = "/ops/track";
+          return;
+        }
+        this.order = out.order || {};
+        this.stages = out.stages || [];
+        this.updates = out.updates || [];
+        this.messages = out.messages || [];
+        this.issues = out.issues || [];
+        this.syncUnread();
+      },
+      async sendMessage(){
+        if(!this.newMessage.trim()) return;
+        const out = await fetch("/api/ops/customer/message", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({message:this.newMessage.trim()})
+        }).then(r=>r.json());
+        if(!out.ok){
+          alert(out.error || "Could not send message");
+          return;
+        }
+        this.newMessage = "";
+        await this.load();
+        this.markMessagesSeen();
+      }
+    });
+  });
+  </script>
+</body>
+</html>

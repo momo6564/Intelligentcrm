@@ -1,12 +1,12 @@
 from datetime import datetime
 from flask import Blueprint, request, render_template, redirect, url_for
-from urllib.parse import quote, quote_plus
+from urllib.parse import quote
 import re
 from ..auth import login_required, get_session_user
 from ..database import get_connection, ensure_crm_tables, ensure_vendor_table
+from ..research_memory import research_placeholder_hints
 from ..utils.text_utils import clean_text
 from ..utils.workspace import workspace_id_for_user
-from ..services.dashboard import manufacturer_dashboard_snapshot
 
 bp = Blueprint('vendors', __name__)
 
@@ -87,7 +87,6 @@ def vendor_detail_page():
     served_rows = []
     my_status = ""
     crm_contact = {}
-    research_url = ""
     research_query = ""
     licensed_orgs = []
     if lookup_name:
@@ -164,11 +163,7 @@ def vendor_detail_page():
             org_set.add(clean_text(vendor.get("organization")))
         licensed_orgs = sorted(org_set)
         org_text = ", ".join(licensed_orgs) if licensed_orgs else "Unknown"
-        research_query = (
-            f'Who owns "{lookup_name}" and what is their official Instagram handle? '
-            f"Licensed organizations: {org_text}. Return owner full name and Instagram username."
-        )
-        research_url = f"https://www.google.com/search?q={quote_plus(research_query)}"
+        research_query = org_text
 
     error = "" if vendor else "Vendor not found."
     return render_app(
@@ -180,8 +175,17 @@ def vendor_detail_page():
         my_status=my_status,
         crm_contact=crm_contact,
         licensed_orgs=licensed_orgs,
-        research_url=research_url,
+        research_url="",
         research_query=research_query,
+        research_entity_data={
+            "vendor_name": lookup_name,
+            "organization": clean_text(vendor.get("organization")),
+            "category": clean_text(vendor.get("category")),
+            "city": clean_text(vendor.get("city")),
+            "state": clean_text(vendor.get("state")),
+            "licensed_organizations": ", ".join(licensed_orgs) if licensed_orgs else "",
+        },
+        research_placeholder_hints=research_placeholder_hints("vendor"),
         error=error,
     )
 

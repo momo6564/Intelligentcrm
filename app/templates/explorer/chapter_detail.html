@@ -18,9 +18,6 @@
           {% else %}
             <span class="rounded-full bg-slate-100 text-slate-600 px-2 py-1 text-xs font-semibold">Not in My CRM</span>
           {% endif %}
-          {% if research_url %}
-            <a href="{{ research_url }}" target="_blank" rel="noopener" class="btn-ghost px-3 py-1.5 text-xs">Research</a>
-          {% endif %}
           <a href="/chapters" class="text-sm text-blue-700 hover:underline">Back to Explorer</a>
         </div>
       </div>
@@ -58,6 +55,11 @@
         </div>
       </div>
     </div>
+
+    {% set research_category = "chapter" %}
+    {% set research_title = "Chapter Research Memory" %}
+    {% set research_entity_label = chapter.chapterName or "chapter" %}
+    {% include "components/research_memory_panel.html" %}
 
     <div class="panel p-4"
          x-data="chapterCrm()"
@@ -224,6 +226,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="{{ url_for('static', filename='research_memory.js') }}"></script>
 <script>
 function chapterCrm(){
   return {
@@ -251,7 +254,7 @@ function chapterCrm(){
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify({
-          chapter_id: {{ chapter.id|tojson }},
+          chapter_id: {{ chapter.id|default('')|tojson }},
           instagram_url: this.instagramUrl
         })
       });
@@ -264,12 +267,12 @@ function chapterCrm(){
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify({
-          chapter_id: {{ chapter.id|tojson }},
-          chapter_name: {{ chapter.chapterName|tojson }},
-          license_type: {{ chapter.orgName|tojson }},
-          school: {{ chapter.school|tojson }},
-          city: {{ chapter.city|tojson }},
-          state: {{ chapter.state|tojson }},
+          chapter_id: {{ chapter.id|default('')|tojson }},
+          chapter_name: {{ chapter.chapterName|default('')|tojson }},
+          license_type: {{ chapter.orgName|default('')|tojson }},
+          school: {{ chapter.school|default('')|tojson }},
+          city: {{ chapter.city|default('')|tojson }},
+          state: {{ chapter.state|default('')|tojson }},
           action: action
         })
       });

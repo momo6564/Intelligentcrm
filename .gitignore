@@ -27,6 +27,7 @@ data/*.xlsx
 data/*.zip
 data/uploads/
 *.localbak-*
+*.py_failed
 
 # OS/editor noise
 .DS_Store

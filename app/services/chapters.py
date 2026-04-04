@@ -12,7 +12,7 @@ from ..utils.data_parse import (
 )
 
 _ROWS_CACHE = {"expires_at": 0.0, "rows": []}
-_CACHE_TTL_SECONDS = 5.0
+_CACHE_TTL_SECONDS = 60.0
 
 def fetch_normalized_rows(force_refresh: bool = False) -> List[dict]:
     now = time.monotonic()
@@ -23,10 +23,14 @@ def fetch_normalized_rows(force_refresh: bool = False) -> List[dict]:
     conn = get_connection()
     ensure_crm_tables(conn)
 
-    table_name = "chapters_raw"
+    table_name = "chapters"
     table_info = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    if table_info:
+        chapter_cols = {row[1] for row in table_info}
+        if "chapter_uid" not in chapter_cols:
+            table_info = []
     if not table_info:
-        table_name = "chapters"
+        table_name = "chapters_raw"
         table_info = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     columns = [row[1] for row in table_info]
     if not columns:

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Login - Greek Chapters CRM</title>
+  <title>Finish Google Sign Up</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -31,7 +31,7 @@
       padding:16px;
     }
     .card{
-      width:min(460px, 96vw);
+      width:min(560px, 96vw);
       border:1px solid var(--line);
       background:linear-gradient(180deg, #ffffff, #f7fbff);
       border-radius:22px;
@@ -43,7 +43,7 @@
     .title{ margin:0; font-size:1.35rem; font-weight:800; letter-spacing:-.01em; }
     .subtitle{ color:var(--muted); font-size:.9rem; }
     .field{ display:grid; gap:5px; font-size:.9rem; font-weight:600; }
-    .field input{
+    .field input, .field select{
       border:1px solid var(--line);
       border-radius:12px;
       padding:10px 12px;
@@ -51,7 +51,7 @@
       color:#133b6f;
       background:#fff;
     }
-    .field input:focus{
+    .field input:focus, .field select:focus{
       outline:none;
       border-color:#75aeff;
       box-shadow:0 0 0 3px rgba(46,125,255,.20);
@@ -66,7 +66,6 @@
       padding:10px 12px;
       cursor:pointer;
     }
-    .btn:hover{ filter:brightness(1.03); }
     .error{
       border:1px solid #ffc9d5;
       background:#fff2f6;
@@ -80,39 +79,30 @@
       background:#f3f8ff;
       border-radius:12px;
       padding:10px;
-      font-size:.82rem;
+      font-size:.84rem;
       color:#486b9f;
-      line-height:1.4;
     }
-    a{ color:#165fd6; font-weight:700; text-decoration:none; }
-    a:hover{ text-decoration:underline; }
   </style>
 </head>
 <body>
   <form method="post" class="card">
-    <h1 class="title">Welcome Back</h1>
-    <div class="subtitle">Sign in to your workspace.</div>
+    <h1 class="title">Finish Google Sign Up</h1>
+    <div class="subtitle">Google authentication is complete. Choose what kind of workspace this account should open.</div>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
-    <input type="hidden" name="next" value="{{ next_path }}">
-    <label class="field">Username
-      <input name="username" autocomplete="username" required>
-    </label>
-    <label class="field">Password
-      <input name="password" type="password" autocomplete="current-password" required>
-    </label>
-    <button type="submit" class="btn">Login</button>
-    {% if google_enabled %}
     <div class="meta">
-      Or continue with Google.
-      <div style="margin-top:8px;">
-        <a href="/google/login?next={{ next_path | urlencode }}" class="btn" style="display:inline-block;text-align:center;width:100%;text-decoration:none;">Sign in with Google</a>
-      </div>
+      Signed in as {{ pending_email or "Google account" }}.
     </div>
-    {% endif %}
-    <div class="subtitle">Need a new workspace? <a href="/signup">Create account</a></div>
-    <div class="subtitle">Forgot password? <a href="/reset-password">Reset it</a></div>
-    <div class="subtitle">Customer tracking code? <a href="/ops/track">Open customer tracker</a></div>
-  
+    <label class="field">I Am Signing Up As
+      <select name="account_type" required>
+        <option value="">Choose account type</option>
+        <option value="manufacturer">Manufacturer</option>
+        <option value="brand_owner">Vendor / Brand Owner</option>
+      </select>
+    </label>
+    <label class="field">Manufacturer or Brand Owner Name
+      <input name="account_name" value="{{ pending_name or '' }}" required>
+    </label>
+    <button type="submit" class="btn">Create Workspace</button>
   </form>
 </body>
 </html>

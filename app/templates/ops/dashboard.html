@@ -1,0 +1,735 @@
+{% extends "layouts/app_shell.html" %}
+{% block title %}Order Operations{% endblock %}
+{% block page_title %}Order Operations{% endblock %}
+{% block page_subtitle %}Two connected workspaces for customer order tracking and internal CRM operations{% endblock %}
+{% block content %}
+<div x-data x-init="$store.ops.load()" class="space-y-4">
+  <div class="grid grid-cols-2 xl:grid-cols-5 gap-3">
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Orders</div>
+      <div class="text-2xl font-semibold" x-text="$store.ops.dashboard.kpis.total_orders || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Delayed</div>
+      <div class="text-2xl font-semibold text-rose-700" x-text="$store.ops.dashboard.kpis.delayed_orders || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Updates Today</div>
+      <div class="text-2xl font-semibold text-emerald-700" x-text="$store.ops.dashboard.kpis.updates_today || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Missed Planned Days</div>
+      <div class="text-2xl font-semibold text-rose-700" x-text="$store.ops.dashboard.kpis.overdue_orders || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs text-slate-500 uppercase">Customer Milestones</div>
+      <div class="text-2xl font-semibold" x-text="$store.ops.dashboard.kpis.customer_visible_milestones || 0"></div>
+    </div>
+  </div>
+
+  <div class="panel p-4 space-y-3">
+    <div class="flex flex-wrap items-center gap-2">
+      <button type="button" @click="$store.ops.activeTab='tracker'" class="btn-ghost px-3 py-1.5 text-sm"
+              :class="$store.ops.activeTab==='tracker' ? '!bg-[#1d68ee] !text-white !border-[#1d68ee]' : ''">Workspace 1: Order Tracker</button>
+      {% if can_view_internal_workspace %}
+      <button type="button" @click="$store.ops.openInternal()" class="btn-ghost px-3 py-1.5 text-sm"
+              :class="$store.ops.activeTab==='internal' ? '!bg-[#1d68ee] !text-white !border-[#1d68ee]' : ''">Workspace 2: Internal CRM</button>
+      {% endif %}
+      <a href="/crm" class="ml-auto btn-ghost px-3 py-1.5 text-sm">Open Existing CRM</a>
+      <button type="button" @click="$store.ops.load(true)" class="btn-ghost px-3 py-1.5 text-sm">Refresh</button>
+    </div>
+    <div class="text-sm text-slate-500" x-show="$store.ops.activeTab==='tracker'">
+      First-version focus: what order it is, what stage it is in, what happened today, and if it is delayed why and until when.
+    </div>
+    <div class="text-sm text-slate-500" x-show="$store.ops.activeTab==='internal'">
+      Internal workspace bridges clients, leads, sample requests, follow-ups, and automations without replacing the working CRM pages.
+    </div>
+  </div>
+
+  <div x-show="$store.ops.activeTab==='tracker'" class="space-y-4">
+    {% if can_edit_order %}
+    <div class="panel p-4">
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <div class="text-xs uppercase text-slate-500">New Order</div>
+          <h3 class="text-lg font-semibold">Create Order From CRM Contact</h3>
+        </div>
+      </div>
+      <div class="mt-3 grid md:grid-cols-2 xl:grid-cols-3 gap-3 text-sm">
+        <select x-model="$store.ops.newOrder.crm_contact_id" @change="$store.ops.applyCrmContact()" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="">Choose CRM contact</option>
+          <template x-for="row in $store.ops.dashboard.crm_contacts" :key="row.id">
+            <option :value="row.id" x-text="`${row.name} | ${(row.status || 'prospect').replace('_',' ')}`"></option>
+          </template>
+        </select>
+        <input x-model="$store.ops.newOrder.order_number" placeholder="Order number" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input x-model="$store.ops.newOrder.title" placeholder="Order title" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input x-model="$store.ops.newOrder.client_name" placeholder="Customer name" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input x-model="$store.ops.newOrder.crm_connection" placeholder="CRM connection / account note" class="rounded-xl border border-slate-300 px-3 py-2 text-sm" readonly>
+        <input x-model="$store.ops.newOrder.product_type" placeholder="Product type" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input type="number" x-model="$store.ops.newOrder.quantity" placeholder="Quantity" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input type="date" x-model="$store.ops.newOrder.planned_start_date" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input type="number" min="1" max="60" x-model="$store.ops.newOrder.planned_duration_days" placeholder="Completion days (max 60)" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input type="date" x-model="$store.ops.newOrder.requested_delivery_date" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <select x-model="$store.ops.newOrder.priority" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="normal">Normal Priority</option>
+          <option value="high">High Priority</option>
+          <option value="low">Low Priority</option>
+        </select>
+        <select x-model="$store.ops.newOrder.brand_owner_workspace_id" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="">Share later or keep internal</option>
+          <template x-for="row in $store.ops.dashboard.linked_brand_owners" :key="row.brand_owner_workspace_id">
+            <option :value="row.brand_owner_workspace_id" x-text="`Share to ${row.brand_owner_name}`"></option>
+          </template>
+        </select>
+        <textarea x-model="$store.ops.newOrder.order_summary" rows="3" placeholder="Order summary and customer commitments..." class="md:col-span-2 xl:col-span-3 rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+      </div>
+      <div class="mt-3 text-xs text-slate-500">If you pick a CRM contact, the customer name is pulled in automatically and the order stays linked to that CRM record. Add completion days to let the app build the daily production calendar automatically.</div>
+      <div class="mt-3 flex justify-end">
+        <button type="button" @click="$store.ops.createOrder()" class="btn-primary px-3 py-2 text-sm">Create Order</button>
+      </div>
+    </div>
+
+    <div class="panel p-4">
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <div class="text-xs uppercase text-slate-500">Brand Owner Links</div>
+          <h3 class="text-lg font-semibold">Connect Customer Workspaces</h3>
+        </div>
+      </div>
+      <div class="mt-3 grid md:grid-cols-[1fr_auto] gap-3">
+        <input x-model="$store.ops.newBrandOwnerWorkspace" placeholder="Brand-owner workspace ID" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <button type="button" @click="$store.ops.linkBrandOwner()" class="btn-primary px-3 py-2 text-sm">Link Workspace</button>
+      </div>
+      <div class="mt-3 space-y-2">
+        <template x-for="row in $store.ops.dashboard.linked_brand_owners" :key="row.brand_owner_workspace_id">
+          <div class="rounded-xl border border-slate-200 p-3">
+            <div class="text-sm font-medium" x-text="row.brand_owner_name"></div>
+            <div class="text-[11px] text-slate-400" x-text="row.brand_owner_workspace_id"></div>
+          </div>
+        </template>
+        <div x-show="$store.ops.dashboard.linked_brand_owners.length===0" class="text-xs text-slate-400">No brand-owner workspaces linked yet.</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="panel overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
+        <div>
+          <div class="text-xs uppercase text-slate-500">Customer Order Tracker</div>
+          <h3 class="text-lg font-semibold">Orders</h3>
+        </div>
+        <div class="text-xs text-slate-500" x-text="`${$store.ops.dashboard.orders.length || 0} orders`"></div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="table-head text-xs uppercase text-slate-500">
+            <tr>
+              <th class="text-left px-3 py-2">Order</th>
+              <th class="text-left px-3 py-2">Client</th>
+              <th class="text-left px-3 py-2">Current Stage</th>
+              <th class="text-left px-3 py-2">Today</th>
+              <th class="text-left px-3 py-2">Delay</th>
+              <th class="text-left px-3 py-2">Revised Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="row in $store.ops.dashboard.orders" :key="row.id">
+              <tr class="border-b border-slate-100 hover:bg-slate-50 cursor-pointer" :class="$store.ops.orderRowClass(row)" @click="$store.ops.select(row.id)">
+                <td class="px-3 py-2">
+                  <div class="font-medium" x-text="row.order_number"></div>
+                  <div class="text-xs text-slate-500" x-text="row.title"></div>
+                </td>
+                <td class="px-3 py-2" x-text="row.client_name || row.customer_name || '-'"></td>
+                <td class="px-3 py-2">
+                  <span class="inline-flex rounded-md px-2 py-0.5 text-xs" :class="$store.ops.stageClass(row)" x-text="row.current_stage_name || '-'"></span>
+                </td>
+                <td class="px-3 py-2">
+                  <div x-text="row.today_schedule_label || row.last_update_summary || '-'"></div>
+                  <div class="text-[11px] text-rose-600" x-show="Number(row.overdue_day_count || 0) > 0" x-text="`${row.overdue_day_count} missed day(s)`"></div>
+                </td>
+                <td class="px-3 py-2" x-text="row.delay_reason || (Number(row.overdue_day_count || 0) > 0 ? 'Behind schedule' : '-')"></td>
+                <td class="px-3 py-2" x-text="row.revised_ship_date || row.planned_ship_date || row.requested_delivery_date || '-'"></td>
+              </tr>
+            </template>
+            <tr x-show="$store.ops.dashboard.orders.length===0">
+              <td colspan="6" class="px-6 py-8 text-center text-slate-500">No orders yet. Create the first order to instantiate the editable production workflow.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {% if can_view_internal_workspace %}
+  <div x-show="$store.ops.activeTab==='internal'" class="space-y-4">
+    <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <div class="kpi-card">
+        <div class="text-xs text-slate-500 uppercase">Clients</div>
+        <div class="text-2xl font-semibold" x-text="$store.ops.internal.kpis.clients || 0"></div>
+      </div>
+      <div class="kpi-card">
+        <div class="text-xs text-slate-500 uppercase">Repeat Clients</div>
+        <div class="text-2xl font-semibold text-emerald-700" x-text="$store.ops.internal.kpis.repeat_clients || 0"></div>
+      </div>
+      <div class="kpi-card">
+        <div class="text-xs text-slate-500 uppercase">Open Samples</div>
+        <div class="text-2xl font-semibold text-amber-700" x-text="$store.ops.internal.kpis.sample_requests_open || 0"></div>
+      </div>
+      <div class="kpi-card">
+        <div class="text-xs text-slate-500 uppercase">Follow-ups Due</div>
+        <div class="text-2xl font-semibold text-rose-700" x-text="$store.ops.internal.kpis.crm_follow_ups_due || 0"></div>
+      </div>
+    </div>
+
+    <div class="grid xl:grid-cols-[1.2fr_.8fr] gap-4">
+      <div class="panel overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
+          <div>
+            <div class="text-xs uppercase text-slate-500">Client Profiles</div>
+            <h3 class="text-lg font-semibold">Recent Clients</h3>
+          </div>
+          <div class="text-xs text-slate-500">Connected with order data</div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="table-head text-xs uppercase text-slate-500">
+              <tr>
+                <th class="text-left px-3 py-2">Client</th>
+                <th class="text-left px-3 py-2">Primary Contact</th>
+                <th class="text-left px-3 py-2">Orders</th>
+                <th class="text-left px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="row in $store.ops.internal.clients" :key="row.id">
+                <tr class="border-b border-slate-100">
+                  <td class="px-3 py-2 font-medium" x-text="row.name"></td>
+                  <td class="px-3 py-2" x-text="row.primary_contact || row.email || '-'"></td>
+                  <td class="px-3 py-2" x-text="row.order_count || 0"></td>
+                  <td class="px-3 py-2 capitalize" x-text="row.status || 'active'"></td>
+                </tr>
+              </template>
+              <tr x-show="$store.ops.internal.clients.length===0">
+                <td colspan="4" class="px-6 py-8 text-center text-slate-500">Clients created from new orders will show up here.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <div class="panel p-4">
+          <div class="text-xs uppercase text-slate-500">Pipeline Bridge</div>
+          <h3 class="text-lg font-semibold">Existing CRM Status Mix</h3>
+          <div class="mt-3 flex flex-wrap gap-2 text-xs">
+            <template x-for="(count, stage) in $store.ops.internal.crm_pipeline" :key="stage">
+              <span class="inline-flex rounded-full border border-slate-200 px-3 py-1 bg-white">
+                <span x-text="stage.replace('_',' ')"></span>
+                <span class="ml-1 font-semibold" x-text="count"></span>
+              </span>
+            </template>
+          </div>
+        </div>
+
+        <div class="panel p-4">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="text-xs uppercase text-slate-500">Sample Requests</div>
+              <h3 class="text-lg font-semibold">Create Quick Sample Task</h3>
+            </div>
+          </div>
+          <div class="mt-3 space-y-2">
+            <input x-model="$store.ops.newSample.title" placeholder="Sample request title" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+            <input type="date" x-model="$store.ops.newSample.due_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+            <textarea x-model="$store.ops.newSample.notes" rows="3" placeholder="Notes" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+            <button type="button" @click="$store.ops.createSampleRequest()" class="btn-primary px-3 py-2 text-sm w-full">Create Sample Request</button>
+          </div>
+          <div class="mt-3 space-y-2">
+            <template x-for="row in $store.ops.internal.sample_requests" :key="row.id">
+              <div class="rounded-xl border border-slate-200 p-3">
+                <div class="text-sm font-medium" x-text="row.title"></div>
+                <div class="text-xs text-slate-500" x-text="`${row.client_name || 'No client'} | Due: ${row.due_date || '-'}`"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block context_panel %}
+<aside x-data class="panel p-4 h-fit">
+  <template x-if="!$store.ops.detail.order">
+    <div class="space-y-3 text-sm text-slate-500">
+      <div>Select an order to inspect its stage timeline, today log, and delay history.</div>
+      <div>The new workspace is intentionally isolated from the working CRM and explorer flows. Existing pages still live at `/crm`, `/chapters`, and `/vendors`.</div>
+    </div>
+  </template>
+
+  <template x-if="$store.ops.detail.order">
+    <div class="space-y-4">
+      <div>
+        <div class="text-xs uppercase text-slate-500">Selected Order</div>
+        <h3 class="text-lg font-semibold" x-text="$store.ops.detail.order.order_number"></h3>
+        <div class="text-sm text-slate-500" x-text="$store.ops.detail.order.title"></div>
+        <div class="text-xs text-slate-500 mt-1" x-text="`Client: ${$store.ops.detail.order.client_name || $store.ops.detail.order.customer_name || '-'}`"></div>
+        <div class="text-xs text-slate-500" x-text="`Current stage: ${$store.ops.detail.order.current_stage_name || '-'}`"></div>
+        <div class="text-xs text-slate-500" x-text="`Latest update: ${$store.ops.detail.order.last_update_summary || '-'}`"></div>
+        <div class="text-xs text-slate-500" x-text="`Today: ${$store.ops.detail.order.today_schedule_label || 'No activity scheduled'}`"></div>
+        <div class="text-xs text-rose-600" x-show="Number($store.ops.detail.order.overdue_day_count || 0) > 0" x-text="`${$store.ops.detail.order.overdue_day_count} planned day(s) are overdue`"></div>
+        <div class="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div class="text-[11px] uppercase text-slate-500">Customer Tracker</div>
+          <div class="text-sm font-semibold" x-text="$store.ops.detail.order.customer_access_code || '-'"></div>
+          <div class="text-xs text-slate-500 mt-1">Share this code with the customer for `/ops/track`.</div>
+        </div>
+        <a :href="`/ops/orders/${$store.ops.detail.order.id}/planner`" class="mt-2 inline-flex rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Open Day Planner</a>
+      </div>
+
+        <div>
+          <div class="text-xs uppercase text-slate-500 mb-2">Workflow Timeline</div>
+        <div class="space-y-2 max-h-[20rem] overflow-auto">
+          <template x-for="stage in $store.ops.detail.stages" :key="stage.id">
+            <button type="button" @click="$store.ops.openStage(stage)" class="w-full text-left rounded-xl border border-slate-200 p-3 hover:bg-slate-50">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-sm font-medium" x-text="stage.stage_name"></div>
+                <span class="inline-flex rounded-md px-2 py-0.5 text-xs" :class="$store.ops.stageClass(stage)" x-text="stage.status || 'pending'"></span>
+              </div>
+              <div class="text-xs text-slate-500 mt-1" x-text="`Plan: ${stage.planned_start_date || '-'} -> ${stage.revised_end_date || stage.planned_end_date || '-'}`"></div>
+              <div class="text-xs text-slate-500" x-text="`Actual: ${stage.actual_start_date || '-'} -> ${stage.actual_end_date || '-'}`"></div>
+              <div class="text-xs text-rose-700" x-show="stage.delay_reason" x-text="stage.delay_reason"></div>
+            </button>
+          </template>
+        </div>
+        </div>
+
+        <div>
+          <div class="text-xs uppercase text-slate-500 mb-2">Brand Owner Access</div>
+          <div class="space-y-2">
+            <template x-for="row in ($store.ops.detail.brand_access || [])" :key="row.id">
+              <div class="rounded-xl border border-slate-200 p-3">
+                <div class="text-sm font-medium" x-text="row.brand_owner_name"></div>
+                <div class="text-[11px] text-slate-400" x-text="row.brand_owner_workspace_id"></div>
+              </div>
+            </template>
+            <div x-show="($store.ops.detail.brand_access || []).length===0" class="text-xs text-slate-400">This order is not shared with a signed-in brand-owner workspace yet.</div>
+          </div>
+          {% if can_edit_order %}
+          <div class="mt-3 grid gap-2">
+            <select x-model="$store.ops.shareBrandOwnerWorkspaceId" class="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+              <option value="">Choose linked brand owner</option>
+              <template x-for="row in $store.ops.dashboard.linked_brand_owners" :key="`share-${row.brand_owner_workspace_id}`">
+                <option :value="row.brand_owner_workspace_id" x-text="row.brand_owner_name"></option>
+              </template>
+            </select>
+            <button type="button" @click="$store.ops.shareOrder()" class="btn-ghost px-3 py-2 text-sm w-full">Share This Order</button>
+          </div>
+          {% endif %}
+        </div>
+
+      {% if can_edit_order %}
+      <div class="space-y-3">
+        <div class="text-xs uppercase text-slate-500">Move Value Chain Forward</div>
+        <button type="button" @click="$store.ops.advanceOrder()" class="btn-primary px-3 py-2 text-sm w-full">Complete Current Stage and Move Next</button>
+      </div>
+
+      <div class="space-y-3">
+        <div class="text-xs uppercase text-slate-500">What Happened Today?</div>
+        <textarea x-model="$store.ops.newUpdate.summary" rows="2" placeholder="Short update for today" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+        <textarea x-model="$store.ops.newUpdate.completed_today" rows="2" placeholder="Completed today" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+        <input x-model="$store.ops.newUpdate.next_step" placeholder="Next step" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <button type="button" @click="$store.ops.addUpdate()" class="btn-primary px-3 py-2 text-sm w-full">Log Daily Update</button>
+      </div>
+
+      <div class="space-y-3">
+        <div class="text-xs uppercase text-slate-500">Delay / Issue</div>
+        <input x-model="$store.ops.newIssue.summary" placeholder="Delay summary" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <textarea x-model="$store.ops.newIssue.reason" rows="2" placeholder="Delay reason" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+        <input type="date" x-model="$store.ops.newIssue.revised_due_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <button type="button" @click="$store.ops.addIssue()" class="btn-ghost px-3 py-2 text-sm w-full">Log Delay / Issue</button>
+      </div>
+
+      <div>
+        <div class="text-xs uppercase text-slate-500 mb-2">Active Delays</div>
+        <div class="space-y-2 max-h-[12rem] overflow-auto">
+          <template x-for="row in $store.ops.detail.issues" :key="row.id">
+            <div class="rounded-xl border border-slate-200 p-3" x-show="(row.status || 'open').toLowerCase() === 'open'">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-sm font-medium" x-text="row.summary"></div>
+                  <div class="text-xs text-slate-500 mt-1" x-text="row.reason || 'No reason logged yet'"></div>
+                  <div class="text-[11px] text-slate-400 mt-1" x-text="`Revised date: ${row.revised_due_date || '-'}`"></div>
+                </div>
+                <button type="button" @click="$store.ops.resolveIssue(row.id)" class="btn-ghost px-2 py-1 text-xs shrink-0">Resolve</button>
+              </div>
+            </div>
+          </template>
+          <div x-show="!$store.ops.detail.issues.some((row) => (row.status || 'open').toLowerCase() === 'open')" class="text-xs text-slate-400">No active delays right now.</div>
+        </div>
+      </div>
+
+      <div class="space-y-3" x-show="$store.ops.stageForm.id">
+        <div class="text-xs uppercase text-slate-500">Stage Editor</div>
+        <div class="text-sm font-medium" x-text="$store.ops.stageForm.stage_name || 'Select a stage'"></div>
+        <select x-model="$store.ops.stageForm.status" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <option value="pending">Pending</option>
+          <option value="in_progress">In Progress</option>
+          <option value="blocked">Blocked</option>
+          <option value="completed">Completed</option>
+        </select>
+        <input x-model="$store.ops.stageForm.responsible_person" placeholder="Responsible person" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input type="date" x-model="$store.ops.stageForm.actual_start_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input type="date" x-model="$store.ops.stageForm.actual_end_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <input type="date" x-model="$store.ops.stageForm.revised_end_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+        <textarea x-model="$store.ops.stageForm.delay_reason" rows="2" placeholder="Delay reason or rework note" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+        <button type="button" @click="$store.ops.saveStage()" class="btn-primary px-3 py-2 text-sm w-full">Save Stage</button>
+      </div>
+      {% endif %}
+
+      <div>
+        <div class="text-xs uppercase text-slate-500 mb-2">Customer Messages</div>
+        <div class="space-y-2 max-h-[14rem] overflow-auto">
+          <template x-for="row in $store.ops.detail.comments" :key="row.id">
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-sm font-medium" x-text="row.author_name || row.author_role"></div>
+                <div class="text-[11px] text-slate-400" x-text="row.created_at"></div>
+              </div>
+              <div class="text-sm mt-1" x-text="row.message"></div>
+            </div>
+          </template>
+          <div x-show="$store.ops.detail.comments.length===0" class="text-xs text-slate-400">No messages yet.</div>
+        </div>
+        {% if can_edit_order %}
+        <div class="mt-3 space-y-2">
+          <textarea x-model="$store.ops.newMessage" rows="2" placeholder="Reply to the customer..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+          <button type="button" @click="$store.ops.sendMessage()" class="btn-ghost px-3 py-2 text-sm w-full">Send Message</button>
+        </div>
+        {% endif %}
+      </div>
+
+      <div>
+        <div class="text-xs uppercase text-slate-500 mb-2">Recent Updates</div>
+        <div class="space-y-2 max-h-[14rem] overflow-auto">
+          <template x-for="row in $store.ops.detail.updates" :key="row.id">
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="text-sm font-medium" x-text="row.summary"></div>
+              <div class="text-xs text-slate-500" x-text="row.completed_today || '-'"></div>
+              <div class="text-xs text-slate-400 mt-1" x-text="`${row.update_date || '-'} | ${row.next_step || 'No next step logged'}`"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </template>
+</aside>
+
+<div x-data x-show="$store.ops.detail.order" class="fixed bottom-6 right-6 z-40">
+  <div x-show="$store.ops.messagePanelOpen" class="mb-3 w-[22rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white shadow-2xl">
+    <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+      <div>
+        <div class="text-xs uppercase text-slate-500">Messages</div>
+        <div class="text-sm font-semibold" x-text="$store.ops.detail.order ? ($store.ops.detail.order.order_number || 'Order chat') : 'Order chat'"></div>
+      </div>
+      <button type="button" @click="$store.ops.closeMessages()" class="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600">Close</button>
+    </div>
+    <div class="max-h-[18rem] space-y-2 overflow-auto px-4 py-3">
+      <template x-for="row in $store.ops.detail.comments" :key="`floating-${row.id}`">
+        <div class="rounded-xl border border-slate-200 p-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-sm font-medium" x-text="row.author_name || row.author_role"></div>
+            <div class="text-[11px] text-slate-400" x-text="row.created_at"></div>
+          </div>
+          <div class="mt-1 text-sm" x-text="row.message"></div>
+        </div>
+      </template>
+      <div x-show="$store.ops.detail.comments.length===0" class="text-xs text-slate-400">No messages yet.</div>
+    </div>
+    {% if can_edit_order %}
+    <div class="space-y-2 border-t border-slate-100 px-4 py-3">
+      <textarea x-model="$store.ops.newMessage" rows="2" placeholder="Reply to the customer..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+      <button type="button" @click="$store.ops.sendMessage()" class="btn-primary w-full px-3 py-2 text-sm">Send Message</button>
+    </div>
+    {% endif %}
+  </div>
+  <button type="button" @click="$store.ops.toggleMessages()" class="relative flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-white shadow-xl ring-4 ring-white">
+    <span class="text-lg font-semibold">Chat</span>
+    <span x-show="$store.ops.unreadMessages > 0" class="absolute -right-1 -top-1 inline-flex min-h-6 min-w-6 items-center justify-center rounded-full bg-rose-600 px-1 text-[11px] font-bold text-white" x-text="$store.ops.unreadMessages"></span>
+  </button>
+</div>
+
+<script>
+document.addEventListener("alpine:init", () => {
+  Alpine.store("ops", {
+    loading:false,
+    activeTab:"tracker",
+    messagePanelOpen:false,
+    unreadMessages:0,
+    dashboard:{kpis:{total_orders:0, delayed_orders:0, overdue_orders:0, updates_today:0, customer_visible_milestones:0}, orders:[], crm_contacts:[], linked_brand_owners:[], updates_today:[], workflow:{stages:[]}, automation_events:[]},
+    internal:{kpis:{clients:0, repeat_clients:0, sample_requests_open:0, crm_follow_ups_due:0}, crm_pipeline:{}, clients:[], sample_requests:[], automation_events:[]},
+    detail:{order:null, stages:[], updates:[], issues:[], comments:[], approvals:[], files:[], brand_access:[]},
+    newOrder:{crm_contact_id:"", order_number:"", title:"", client_name:"", crm_connection:"", customer_email:"", product_type:"", quantity:"", planned_start_date:"", planned_duration_days:"", requested_delivery_date:"", priority:"normal", brand_owner_workspace_id:"", order_summary:""},
+    newUpdate:{summary:"", completed_today:"", next_step:""},
+    newIssue:{summary:"", reason:"", revised_due_date:""},
+    newSample:{title:"", due_date:"", notes:""},
+    newMessage:"",
+    newBrandOwnerWorkspace:"",
+    shareBrandOwnerWorkspaceId:"",
+    stageForm:{id:null, stage_name:"", status:"pending", responsible_person:"", actual_start_date:"", actual_end_date:"", revised_end_date:"", delay_reason:""},
+    stageClass(row){
+      const s = String((row && (row.current_stage_status || row.status)) || "").toLowerCase();
+      if(s==="completed") return "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20";
+      if(s==="blocked") return "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-600/20";
+      if(s==="in_progress") return "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-600/20";
+      return "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20";
+    },
+    orderRowClass(row){
+      return Number((row && row.overdue_day_count) || 0) > 0 ? "bg-rose-50/70" : "";
+    },
+    messageSeenKey(){
+      return this.detail.order ? `ops-message-seen-${this.detail.order.id}` : "";
+    },
+    syncMessageNotifications(){
+      if(!this.detail.order){
+        this.unreadMessages = 0;
+        return;
+      }
+      const seenKey = this.messageSeenKey();
+      const seenId = Number(window.localStorage.getItem(seenKey) || 0);
+      this.unreadMessages = (this.detail.comments || []).filter((row) => Number(row.id || 0) > seenId).length;
+      if(this.messagePanelOpen){
+        this.markMessagesSeen();
+      }
+    },
+    markMessagesSeen(){
+      if(!this.detail.order){
+        this.unreadMessages = 0;
+        return;
+      }
+      const latestId = Math.max(0, ...(this.detail.comments || []).map((row) => Number(row.id || 0)));
+      window.localStorage.setItem(this.messageSeenKey(), String(latestId));
+      this.unreadMessages = 0;
+    },
+    toggleMessages(){
+      this.messagePanelOpen = !this.messagePanelOpen;
+      if(this.messagePanelOpen){
+        this.markMessagesSeen();
+      }
+    },
+    closeMessages(){
+      this.messagePanelOpen = false;
+    },
+    async load(force=false){
+      if(this.loading && !force) return;
+      this.loading = true;
+      try{
+        const dash = await fetch("/api/ops/dashboard").then(r=>r.json());
+        if(dash.ok){ this.dashboard = dash; }
+        if(this.activeTab==="internal"){
+          await this.loadInternal();
+        }
+      }finally{
+        this.loading = false;
+      }
+    },
+    async loadInternal(){
+      const out = await fetch("/api/ops/internal").then(r=>r.json());
+      if(out.ok){ this.internal = out; }
+    },
+    async openInternal(){
+      this.activeTab = "internal";
+      await this.loadInternal();
+    },
+    applyCrmContact(){
+      const crmId = Number(this.newOrder.crm_contact_id || 0);
+      const row = this.dashboard.crm_contacts.find((item) => Number(item.id || 0) === crmId);
+      if(!row) return;
+      this.newOrder.client_name = row.name || this.newOrder.client_name;
+      this.newOrder.crm_connection = row.connection || "";
+      if(!this.newOrder.order_summary && row.notes){
+        this.newOrder.order_summary = row.notes;
+      }
+    },
+    async select(orderId){
+      const out = await fetch(`/api/ops/orders/${orderId}`).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not load order", "error");
+        return;
+      }
+      this.detail = {order:out.order, stages:out.stages || [], updates:out.updates || [], issues:out.issues || [], comments:out.comments || [], approvals:out.approvals || [], files:out.files || [], brand_access:out.brand_access || []};
+      this.newUpdate = {summary:"", completed_today:"", next_step:""};
+      this.newIssue = {summary:"", reason:"", revised_due_date:""};
+      this.newMessage = "";
+      this.shareBrandOwnerWorkspaceId = "";
+      this.stageForm = {id:null, stage_name:"", status:"pending", responsible_person:"", actual_start_date:"", actual_end_date:"", revised_end_date:"", delay_reason:""};
+      this.syncMessageNotifications();
+    },
+    openStage(stage){
+      this.stageForm = {
+        id: stage.id,
+        stage_name: stage.stage_name || "",
+        status: stage.status || "pending",
+        responsible_person: stage.responsible_person || "",
+        actual_start_date: stage.actual_start_date || "",
+        actual_end_date: stage.actual_end_date || "",
+        revised_end_date: stage.revised_end_date || "",
+        delay_reason: stage.delay_reason || ""
+      };
+    },
+    async createOrder(){
+      const out = await fetch("/api/ops/orders", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(this.newOrder)
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not create order", "error");
+        return;
+      }
+      this.newOrder = {crm_contact_id:"", order_number:"", title:"", client_name:"", crm_connection:"", customer_email:"", product_type:"", quantity:"", planned_start_date:"", planned_duration_days:"", requested_delivery_date:"", priority:"normal", brand_owner_workspace_id:"", order_summary:""};
+      (window.appToast || alert)("Order created. Opening planner…", "success");
+      window.location.href = out.planner_url || `/ops/orders/${out.order_id}/planner`;
+    },
+    async linkBrandOwner(){
+      if(!this.newBrandOwnerWorkspace.trim()) return;
+      const out = await fetch("/api/ops/brand-links", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({brand_owner_workspace_id:this.newBrandOwnerWorkspace.trim()})
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not link brand-owner workspace", "error");
+        return;
+      }
+      this.newBrandOwnerWorkspace = "";
+      await this.load(true);
+      (window.appToast || alert)("Brand-owner workspace linked", "success");
+    },
+    async shareOrder(){
+      if(!this.detail.order || !this.shareBrandOwnerWorkspaceId) return;
+      const out = await fetch(`/api/ops/orders/${this.detail.order.id}/share`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({brand_owner_workspace_id:this.shareBrandOwnerWorkspaceId})
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not share order", "error");
+        return;
+      }
+      await this.select(this.detail.order.id);
+      await this.load(true);
+      this.shareBrandOwnerWorkspaceId = "";
+      (window.appToast || alert)("Order shared with brand owner", "success");
+    },
+    async addUpdate(){
+      if(!this.detail.order) return;
+      const out = await fetch(`/api/ops/orders/${this.detail.order.id}/updates`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(this.newUpdate)
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not add update", "error");
+        return;
+      }
+      await this.load(true);
+      await this.select(this.detail.order.id);
+      (window.appToast || alert)("Daily update logged", "success");
+    },
+    async addIssue(){
+      if(!this.detail.order) return;
+      const out = await fetch(`/api/ops/orders/${this.detail.order.id}/issues`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(this.newIssue)
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not log issue", "error");
+        return;
+      }
+      await this.load(true);
+      await this.select(this.detail.order.id);
+      (window.appToast || alert)("Delay or issue logged", "success");
+    },
+    async resolveIssue(issueId){
+      if(!this.detail.order) return;
+      const out = await fetch(`/api/ops/orders/${this.detail.order.id}/issues/${issueId}/resolve`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({})
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not resolve issue", "error");
+        return;
+      }
+      await this.load(true);
+      await this.select(this.detail.order.id);
+      (window.appToast || alert)("Delay resolved", "success");
+    },
+    async saveStage(){
+      if(!this.detail.order || !this.stageForm.id) return;
+      const out = await fetch(`/api/ops/orders/${this.detail.order.id}/stages/${this.stageForm.id}`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(this.stageForm)
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not save stage", "error");
+        return;
+      }
+      await this.load(true);
+      await this.select(this.detail.order.id);
+      (window.appToast || alert)("Stage updated", "success");
+    },
+    async advanceOrder(){
+      if(!this.detail.order) return;
+      const out = await fetch(`/api/ops/orders/${this.detail.order.id}/advance`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({})
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not advance stage", "error");
+        return;
+      }
+      await this.load(true);
+      await this.select(this.detail.order.id);
+      (window.appToast || alert)("Moved to the next stage", "success");
+    },
+    async sendMessage(){
+      if(!this.detail.order || !this.newMessage.trim()) return;
+      const out = await fetch(`/api/ops/orders/${this.detail.order.id}/messages`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:this.newMessage.trim()})
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not send message", "error");
+        return;
+      }
+      this.newMessage = "";
+      await this.select(this.detail.order.id);
+      this.markMessagesSeen();
+      (window.appToast || alert)("Message sent", "success");
+    },
+    async createSampleRequest(){
+      const out = await fetch("/api/ops/sample-requests", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(this.newSample)
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not create sample request", "error");
+        return;
+      }
+      this.newSample = {title:"", due_date:"", notes:""};
+      await this.loadInternal();
+      (window.appToast || alert)("Sample request created", "success");
+    }
+  });
+});
+</script>
+{% endblock %}

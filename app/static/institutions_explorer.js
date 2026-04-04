@@ -452,6 +452,19 @@
         return institution ? `/institutions/detail?institution_id=${encodeURIComponent(institution.id)}` : "/institutions";
       },
 
+      selectedResearchContext() {
+        const institution = this.selectedInstitution() || {};
+        return {
+          institution_name: institution.location_name || "",
+          city: institution.city || "",
+          state: institution.state || "",
+          website: institution.website || "",
+          control: institution.control || "",
+          institution_level: institution.institution_level || "",
+          students_total: institution.students_total || "",
+        };
+      },
+
       selectedResearchUrl() {
         const institution = this.selectedInstitution();
         if (!institution) return "https://www.google.com";

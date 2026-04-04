@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sayrab Leads</title>
+  <meta name="description" content="Two-sided operations platform for Greek life and collegiate sales.">
+  <meta property="og:title" content="Sayrab Leads">
+  <meta property="og:description" content="Manage CRM, chapter intelligence, and order operations in one shared workspace.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  {% if landing_css %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='ops_hub/assets/' ~ landing_css) }}">
+  {% endif %}
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    window.opsHubLandingLinks = {{ landing_links | tojson }};
+    (function () {
+      const labelRoutes = {
+        login: window.opsHubLandingLinks.login,
+        signup: window.opsHubLandingLinks.signup,
+        "get started": window.opsHubLandingLinks.get_started,
+        "start for free": window.opsHubLandingLinks.start_free,
+      };
+
+      function normalizeLabel(text) {
+        return (text || "").replace(/\s+/g, " ").trim().toLowerCase();
+      }
+
+      function attachButtonRoutes() {
+        document.querySelectorAll("#root button").forEach((button) => {
+          const label = normalizeLabel(button.textContent);
+          const target = labelRoutes[label];
+          if (!target || button.dataset.opsHubLinked === "1") {
+            return;
+          }
+          button.dataset.opsHubLinked = "1";
+          button.addEventListener("click", () => {
+            window.location.assign(target);
+          });
+        });
+
+        document.querySelectorAll("#root span").forEach((node) => {
+          const label = normalizeLabel(node.textContent);
+          if (label !== "guest order tracking") {
+            return;
+          }
+          const target = window.opsHubLandingLinks.track;
+          const container = node.closest("div");
+          if (!container || container.dataset.opsHubLinked === "1") {
+            return;
+          }
+          container.dataset.opsHubLinked = "1";
+          container.style.cursor = "pointer";
+          container.addEventListener("click", () => {
+            window.location.assign(target);
+          });
+        });
+      }
+
+      const root = document.getElementById("root");
+      if (root) {
+        const observer = new MutationObserver(attachButtonRoutes);
+        observer.observe(root, { childList: true, subtree: true });
+      }
+      window.addEventListener("load", attachButtonRoutes);
+      attachButtonRoutes();
+    }());
+  </script>
+  {% if landing_js %}
+  <script type="module" src="{{ url_for('static', filename='ops_hub/assets/' ~ landing_js) }}"></script>
+  {% endif %}
+</body>
+</html>

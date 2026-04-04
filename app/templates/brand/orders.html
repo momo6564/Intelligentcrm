@@ -1,0 +1,204 @@
+{% extends "layouts/app_shell.html" %}
+{% block page_title %}Orders{% endblock %}
+{% block page_subtitle %}Shared order tracking across all linked manufacturers{% endblock %}
+{% block main_grid %}xl:grid-cols-[320px_1fr]{% endblock %}
+{% block content %}
+<div x-data x-init="$store.brandOrders.load(new URLSearchParams(window.location.search).get('order_id'))" class="space-y-4">
+  <div class="panel p-4">
+    <div class="flex items-center justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase text-slate-500">Tracked Orders</div>
+        <h3 class="text-lg font-semibold">Orders Sidebar</h3>
+      </div>
+      <button type="button" @click="$store.brandOrders.load($store.brandOrders.selectedId)" class="btn-ghost px-3 py-1.5 text-sm">Refresh</button>
+    </div>
+    <div class="mt-3 grid gap-2">
+      <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+        <div class="text-xs uppercase text-slate-500">Track By Code</div>
+        <div class="text-sm text-slate-600">Enter a manufacturer tracking code to add that order into this workspace.</div>
+        <input x-model="$store.brandOrders.accessCode" placeholder="Tracking code" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm uppercase tracking-[0.18em]">
+        <button type="button" @click="$store.brandOrders.redeemCode()" class="btn-primary w-full px-3 py-2 text-sm">Add Order By Code</button>
+      </div>
+      <input x-model="$store.brandOrders.search" @input="$store.brandOrders.applySearch()" placeholder="Search order, manufacturer, stage..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+    </div>
+    <div class="mt-3 space-y-2 max-h-[36rem] overflow-auto">
+      <template x-for="row in $store.brandOrders.filteredOrders" :key="row.id">
+        <button type="button" @click="$store.brandOrders.select(row.id)" class="w-full text-left rounded-xl border border-slate-200 p-3 hover:bg-slate-50" :class="$store.brandOrders.selectedId===row.id ? 'bg-slate-50 border-slate-300' : ''">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-medium truncate" x-text="row.order_number"></div>
+              <div class="text-xs text-slate-500 truncate" x-text="row.title"></div>
+              <div class="text-[11px] text-slate-400 mt-1" x-text="row.manufacturer_name || '-'"></div>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="text-[11px] font-semibold text-rose-600" x-show="row.delay_reason">Delayed</div>
+              <div class="text-[11px] text-slate-400" x-text="row.revised_ship_date || row.requested_delivery_date || '-'"></div>
+            </div>
+          </div>
+        </button>
+      </template>
+      <div x-show="$store.brandOrders.filteredOrders.length===0" class="text-sm text-slate-500">No shared orders match the current filter.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block context_panel %}
+<aside class="space-y-4" x-data>
+  <template x-if="!$store.brandOrders.detail.order">
+    <div class="panel p-4 text-sm text-slate-500">Select an order from the sidebar to inspect progress, delays, updates, and the manufacturer thread.</div>
+  </template>
+
+  <template x-if="$store.brandOrders.detail.order">
+    <div class="space-y-4">
+      <div class="panel p-4">
+        <div class="text-xs uppercase text-slate-500">Selected Order</div>
+        <h3 class="text-lg font-semibold" x-text="$store.brandOrders.detail.order.order_number"></h3>
+        <div class="text-sm text-slate-500" x-text="$store.brandOrders.detail.order.title"></div>
+        <div class="text-xs text-slate-500 mt-2" x-text="`Manufacturer: ${$store.brandOrders.detail.order.manufacturer_name || '-'}`"></div>
+        <div class="text-xs text-slate-500" x-text="`Current stage: ${$store.brandOrders.detail.order.current_stage_name || '-'}`"></div>
+        <div class="text-xs text-slate-500" x-text="`Delivery: ${$store.brandOrders.detail.order.revised_ship_date || $store.brandOrders.detail.order.planned_ship_date || $store.brandOrders.detail.order.requested_delivery_date || '-'}`"></div>
+        <div class="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div class="text-[11px] uppercase text-slate-500">Delay</div>
+          <div class="text-sm font-semibold" x-text="$store.brandOrders.detail.order.delay_reason || 'On track'"></div>
+        </div>
+      </div>
+
+      <div class="panel p-4">
+        <div class="text-xs uppercase text-slate-500 mb-2">Timeline</div>
+        <div class="space-y-2 max-h-[18rem] overflow-auto">
+          <template x-for="stage in $store.brandOrders.detail.stages" :key="stage.id">
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-sm font-medium" x-text="stage.stage_name"></div>
+                <div class="text-[11px] text-slate-500" x-text="stage.status || 'pending'"></div>
+              </div>
+              <div class="text-xs text-slate-500 mt-1" x-text="`Plan: ${stage.planned_start_date || '-'} -> ${stage.revised_end_date || stage.planned_end_date || '-'}`"></div>
+              <div class="text-xs text-rose-600" x-show="stage.delay_reason" x-text="stage.delay_reason"></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="panel p-4">
+        <div class="text-xs uppercase text-slate-500 mb-2">Recent Updates</div>
+        <div class="space-y-2 max-h-[16rem] overflow-auto">
+          <template x-for="row in $store.brandOrders.detail.updates" :key="row.id">
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="text-sm font-medium" x-text="row.summary"></div>
+              <div class="text-xs text-slate-500 mt-1" x-text="row.completed_today || '-'"></div>
+              <div class="text-[11px] text-slate-400 mt-1" x-text="`${row.update_date || '-'} | Next: ${row.next_step || '-'}`"></div>
+            </div>
+          </template>
+          <div x-show="$store.brandOrders.detail.updates.length===0" class="text-xs text-slate-400">No customer-visible updates yet.</div>
+        </div>
+      </div>
+
+      <div class="panel p-4">
+        <div class="text-xs uppercase text-slate-500 mb-2">Messages</div>
+        <div class="space-y-2 max-h-[16rem] overflow-auto">
+          <template x-for="row in $store.brandOrders.detail.messages" :key="row.id">
+            <div class="rounded-xl border border-slate-200 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-sm font-medium" x-text="row.author_name || row.author_role"></div>
+                <div class="text-[11px] text-slate-400" x-text="row.created_at"></div>
+              </div>
+              <div class="text-sm mt-1" x-text="row.message"></div>
+            </div>
+          </template>
+          <div x-show="$store.brandOrders.detail.messages.length===0" class="text-xs text-slate-400">No messages yet.</div>
+        </div>
+        <div class="mt-3 space-y-2">
+          <textarea x-model="$store.brandOrders.newMessage" rows="2" placeholder="Reply to the manufacturer..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+          <button type="button" @click="$store.brandOrders.sendMessage()" class="btn-primary w-full px-3 py-2 text-sm">Send Message</button>
+        </div>
+      </div>
+    </div>
+  </template>
+</aside>
+<script>
+document.addEventListener("alpine:init", () => {
+  Alpine.store("brandOrders", {
+    search:"",
+    accessCode:"",
+    orders:[],
+    filteredOrders:[],
+    selectedId:0,
+    newMessage:"",
+    detail:{order:null, stages:[], updates:[], issues:[], messages:[]},
+    applySearch(){
+      const q = this.search.trim().toLowerCase();
+      if(!q){
+        this.filteredOrders = [...this.orders];
+        return;
+      }
+      this.filteredOrders = this.orders.filter((row) => {
+        return [row.order_number, row.title, row.manufacturer_name, row.current_stage_name, row.delay_reason]
+          .some((value) => String(value || "").toLowerCase().includes(q));
+      });
+    },
+    async load(targetOrderId){
+      const out = await fetch("/api/brand/orders").then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not load shared orders", "error");
+        return;
+      }
+      this.orders = out.orders || [];
+      this.applySearch();
+      const first = Number(targetOrderId || 0) || Number((this.filteredOrders[0] || {}).id || 0);
+      if(first){
+        await this.select(first);
+      }
+    },
+    async redeemCode(){
+      if(!this.accessCode.trim()) return;
+      const out = await fetch("/api/brand/orders/redeem-code", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({access_code:this.accessCode.trim()})
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not add order by code", "error");
+        return;
+      }
+      this.accessCode = "";
+      await this.load(out.order_id);
+      if(out.order_id){
+        await this.select(out.order_id);
+      }
+      (window.appToast || alert)("Order added to your tracked orders", "success");
+    },
+    async select(orderId){
+      this.selectedId = Number(orderId || 0);
+      const out = await fetch(`/api/brand/orders/${this.selectedId}`).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not load order detail", "error");
+        return;
+      }
+      this.detail = {
+        order: out.order || null,
+        stages: out.stages || [],
+        updates: out.updates || [],
+        issues: out.issues || [],
+        messages: out.messages || []
+      };
+    },
+    async sendMessage(){
+      if(!this.detail.order || !this.newMessage.trim()) return;
+      const out = await fetch(`/api/brand/orders/${this.detail.order.id}/messages`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:this.newMessage.trim()})
+      }).then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not send message", "error");
+        return;
+      }
+      this.newMessage = "";
+      await this.select(this.detail.order.id);
+      await this.load(this.detail.order.id);
+      (window.appToast || alert)("Message sent", "success");
+    }
+  });
+});
+</script>
+{% endblock %}

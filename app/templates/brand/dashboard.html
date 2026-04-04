@@ -1,0 +1,95 @@
+{% extends "layouts/app_shell.html" %}
+{% block page_title %}Brand Owner Dashboard{% endblock %}
+{% block page_subtitle %}Track live production across all linked manufacturers{% endblock %}
+{% block content %}
+<div x-data x-init="$store.brandDash.load()" class="space-y-4">
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+    <div class="kpi-card">
+      <div class="text-xs uppercase text-slate-500">Active Orders</div>
+      <div class="text-2xl font-semibold" x-text="$store.brandDash.kpis.active_orders || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs uppercase text-slate-500">Delayed Orders</div>
+      <div class="text-2xl font-semibold text-rose-700" x-text="$store.brandDash.kpis.delayed_orders || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs uppercase text-slate-500">Manufacturers</div>
+      <div class="text-2xl font-semibold" x-text="$store.brandDash.kpis.manufacturers || 0"></div>
+    </div>
+    <div class="kpi-card">
+      <div class="text-xs uppercase text-slate-500">Orders With Messages</div>
+      <div class="text-2xl font-semibold" x-text="$store.brandDash.kpis.orders_with_messages || 0"></div>
+    </div>
+  </div>
+
+  <div class="grid lg:grid-cols-2 gap-4">
+    <div class="panel p-4">
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <div class="text-xs uppercase text-slate-500">Recent Updates</div>
+          <h3 class="text-lg font-semibold">Latest Manufacturer Activity</h3>
+        </div>
+        <a href="/brand/orders" class="btn-ghost px-3 py-1.5 text-sm">Open Orders</a>
+      </div>
+      <div class="mt-3 space-y-2 max-h-[28rem] overflow-auto">
+        <template x-for="row in $store.brandDash.recent_updates" :key="row.id">
+          <a :href="`/brand/orders?order_id=${row.order_id}`" class="block rounded-xl border border-slate-200 p-3 hover:bg-slate-50">
+            <div class="text-sm font-medium" x-text="row.summary"></div>
+            <div class="text-xs text-slate-500 mt-1" x-text="`${row.manufacturer_name || '-'} | ${row.order_number || '-'} | ${row.title || ''}`"></div>
+            <div class="text-[11px] text-slate-400 mt-1" x-text="row.update_date || '-'"></div>
+          </a>
+        </template>
+        <div x-show="$store.brandDash.recent_updates.length===0" class="text-sm text-slate-500">No shared-order updates yet.</div>
+      </div>
+    </div>
+
+    <div class="panel p-4">
+      <div class="flex items-center justify-between gap-2">
+        <div>
+          <div class="text-xs uppercase text-slate-500">Manufacturers</div>
+          <h3 class="text-lg font-semibold">Who Is Producing Now</h3>
+        </div>
+        <a href="/brand/manufacturers" class="btn-ghost px-3 py-1.5 text-sm">View All</a>
+      </div>
+      <div class="mt-3 space-y-2 max-h-[28rem] overflow-auto">
+        <template x-for="row in $store.brandDash.manufacturers" :key="row.workspace_id">
+          <div class="rounded-xl border border-slate-200 p-3">
+            <div class="text-sm font-medium" x-text="row.name"></div>
+            <div class="text-xs text-slate-500 mt-1" x-text="`${row.active_orders || 0} active | ${row.delayed_orders || 0} delayed`"></div>
+          </div>
+        </template>
+        <div x-show="$store.brandDash.manufacturers.length===0" class="text-sm text-slate-500">No manufacturer links yet.</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block context_panel %}
+<aside class="panel p-4 h-fit">
+  <div class="text-xs uppercase text-slate-500">Workspace Logic</div>
+  <div class="mt-2 text-sm text-slate-600">This dashboard rolls up shared orders from multiple manufacturers into one brand-owner workspace.</div>
+  <div class="mt-4 space-y-2">
+    <a href="/brand/orders" class="btn-primary block text-center px-3 py-2 text-sm">Open Shared Orders</a>
+    <a href="/crm" class="btn-ghost block text-center px-3 py-2 text-sm">Open Brand CRM</a>
+  </div>
+</aside>
+<script>
+document.addEventListener("alpine:init", () => {
+  Alpine.store("brandDash", {
+    kpis:{active_orders:0, delayed_orders:0, manufacturers:0, orders_with_messages:0},
+    manufacturers:[],
+    recent_updates:[],
+    async load(){
+      const out = await fetch("/api/brand/dashboard").then(r=>r.json());
+      if(!out.ok){
+        (window.appToast || alert)(out.error || "Could not load brand dashboard", "error");
+        return;
+      }
+      this.kpis = out.kpis || this.kpis;
+      this.manufacturers = out.manufacturers || [];
+      this.recent_updates = out.recent_updates || [];
+    }
+  });
+});
+</script>
+{% endblock %}

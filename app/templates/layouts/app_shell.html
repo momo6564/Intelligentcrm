@@ -97,7 +97,7 @@
       opacity:0;
       pointer-events:none;
       transition:all .18s ease;
-      z-index:20;
+      z-index:2000;
     }
     .nav-link:hover .nav-tooltip,
     .nav-link:focus-visible .nav-tooltip,
@@ -163,16 +163,7 @@
         padding:10px 12px;
       }
       .nav-tooltip{
-        position:static;
-        opacity:1;
-        pointer-events:auto;
-        transform:none;
-        border:none;
-        box-shadow:none;
-        background:transparent;
-        padding:0;
-        font-size:14px;
-        font-weight:600;
+        display:none !important;
       }
       .rail-brand-mark,
       .rail-user-card,
@@ -271,6 +262,12 @@
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10 12 4l9 6"/><path d="M5 10v8"/><path d="M9 10v8"/><path d="M15 10v8"/><path d="M19 10v8"/><path d="M3 20h18"/></svg>
       {% elif name == "crm" %}
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16v12H4z"/><path d="M8 10h8"/><path d="M8 14h5"/></svg>
+      {% elif name == "orders" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 6h14"/><path d="M5 12h14"/><path d="M5 18h14"/><path d="M8 3v6"/><path d="M16 9v6"/></svg>
+      {% elif name == "ops" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16"/><path d="M6 7v11h12V7"/><path d="M9 11h6"/><path d="M9 15h4"/></svg>
+      {% elif name == "manufacturers" %}
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21h18"/><path d="M5 21V8l7-4 7 4v13"/><path d="M9 21v-6h6v6"/><path d="M9 10h.01"/><path d="M15 10h.01"/></svg>
       {% elif name == "team" %}
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3"/><path d="M20 21v-2a4 4 0 0 0-3-3.87"/><path d="M16.5 4.13a3 3 0 0 1 0 5.74"/></svg>
       {% elif name == "team_dashboard" %}
@@ -281,15 +278,28 @@
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/></svg>
       {% endif %}
     {%- endmacro %}
-    {% set nav_items = [
-      {"href":"/dashboard","label":"Dashboard","icon":"dashboard","prefix":"/dashboard"},
-      {"href":"/chapters","label":"Chapter Explorer","icon":"chapters","prefix":"/chapters"},
-      {"href":"/vendors","label":"Vendor Explorer","icon":"vendors","prefix":"/vendors"},
-      {"href":"/institutions","label":"Education Institutions","icon":"institutions","prefix":"/institutions"},
-      {"href":"/crm","label":"Unified CRM","icon":"crm","prefix":"/crm"},
-      {"href":"/team","label":"Team Workspace","icon":"team","prefix":"/team"},
-      {"href":"/team/dashboard","label":"Team Dashboard","icon":"team_dashboard","prefix":"/team/dashboard"}
-    ] %}
+    {% set account_type = (me.account_type or "manufacturer")|lower %}
+    {% if account_type == "brand_owner" %}
+      {% set nav_items = [
+        {"href":"/brand/dashboard","label":"Dashboard","icon":"dashboard","prefix":"/brand/dashboard"},
+        {"href":"/brand/orders","label":"Orders","icon":"orders","prefix":"/brand/orders"},
+        {"href":"/chapters","label":"Chapter Explorer","icon":"chapters","prefix":"/chapters"},
+        {"href":"/institutions","label":"Education Institutions","icon":"institutions","prefix":"/institutions"},
+        {"href":"/crm","label":"CRM","icon":"crm","prefix":"/crm"},
+        {"href":"/brand/manufacturers","label":"Manufacturers","icon":"manufacturers","prefix":"/brand/manufacturers"}
+      ] %}
+    {% else %}
+      {% set nav_items = [
+        {"href":"/dashboard","label":"Dashboard","icon":"dashboard","prefix":"/dashboard"},
+        {"href":"/chapters","label":"Chapter Explorer","icon":"chapters","prefix":"/chapters"},
+        {"href":"/vendors","label":"Vendor Explorer","icon":"vendors","prefix":"/vendors"},
+        {"href":"/institutions","label":"Education Institutions","icon":"institutions","prefix":"/institutions"},
+        {"href":"/crm","label":"Unified CRM","icon":"crm","prefix":"/crm"},
+        {"href":"/ops","label":"Order Ops","icon":"ops","prefix":"/ops"},
+        {"href":"/team","label":"Team Workspace","icon":"team","prefix":"/team"},
+        {"href":"/team/dashboard","label":"Team Dashboard","icon":"team_dashboard","prefix":"/team/dashboard"}
+      ] %}
+    {% endif %}
     <aside class="glass border-r border-slate-200/80 p-3 lg:px-4 lg:py-5">
       <div class="rail-brand mb-6 flex justify-center">
         <a href="/dashboard" class="rail-brand-mark" aria-label="Greek Chapters Intelligence CRM">GC</a>
@@ -321,6 +331,7 @@
           <div class="rail-user-card">{{ (me.username or "?")[:1] | upper }}</div>
           <div class="nav-tooltip">
             <div>{{ me.username }}{% if me.role %} ({{ me.role }}){% endif %}</div>
+            <div class="text-[11px] font-semibold text-slate-500">{{ account_type.replace('_', ' ')|title }}</div>
             <div class="text-[11px] font-semibold text-slate-500">{{ me.account_name or "No account mapped" }}</div>
           </div>
         </div>

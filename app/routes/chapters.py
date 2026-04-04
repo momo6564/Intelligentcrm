@@ -1,7 +1,7 @@
 from flask import Blueprint, request, render_template
-from urllib.parse import quote_plus
 from ..auth import login_required, get_session_user
 from ..database import get_connection, ensure_crm_tables, ensure_chapters_table, ensure_institutions_table
+from ..research_memory import research_placeholder_hints
 from ..services.chapters import chapter_detail_bundle
 from ..utils.text_utils import clean_text
 from ..utils.workspace import workspace_id_for_user
@@ -178,12 +178,6 @@ def chapter_detail_page(chapter_id: str):
                 president_instagram_url = president_instagram
                 president_instagram_label = president_instagram
 
-    research_query = (
-        f'Find the official website and Instagram for "{chapter_name}" of "{org_name}" at "{school}". '
-        "Also find the chapter president name and their Instagram handle. "
-        "Return direct links to the chapter website and the Instagram profiles (chapter and president)."
-    )
-    research_url = f"https://www.google.com/search?q={quote_plus(research_query)}"
     return render_app(
         "explorer/chapter_detail.html",
         chapter=chapter,
@@ -191,8 +185,16 @@ def chapter_detail_page(chapter_id: str):
         same_state=bundle["same_state"],
         my_status=my_status,
         crm_contact=crm_contact,
-        research_url=research_url,
-        research_query=research_query,
+        research_url="",
+        research_query="",
+        research_entity_data={
+            "chapter_name": chapter_name,
+            "organization": org_name,
+            "school": school,
+            "city": clean_text(chapter.get("city")),
+            "state": clean_text(chapter.get("state")),
+        },
+        research_placeholder_hints=research_placeholder_hints("chapter"),
         chapter_instagram_url=chapter_instagram_url,
         chapter_instagram_label=chapter_instagram_label,
         chapter_website=chapter_website,

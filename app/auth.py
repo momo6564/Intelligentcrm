@@ -4,6 +4,14 @@ from flask import request, jsonify, redirect, url_for, session
 from .database import get_connection, ensure_crm_tables, ensure_default_users, derive_workspace_id
 from .utils.text_utils import clean_text
 
+
+def account_type_for_user(user: dict | None) -> str:
+    return clean_text((user or {}).get("account_type")).lower() or "manufacturer"
+
+
+def is_brand_owner_user(user: dict | None) -> bool:
+    return account_type_for_user(user) == "brand_owner"
+
 def _table_has_column(conn, table_name: str, col_name: str) -> bool:
     cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
     return col_name in cols
@@ -79,7 +87,7 @@ def get_session_user() -> dict:
     ensure_crm_tables(conn)
     ensure_default_users(conn)
     row = conn.execute(
-        "SELECT id, username, account_name, workspace_id, manufacturer_id, role, team_id, team_role FROM users WHERE id=?",
+        "SELECT id, username, account_name, workspace_id, manufacturer_id, brand_owner_id, account_type, role, team_id, team_role FROM users WHERE id=?",
         (int(user_id),),
     ).fetchone()
     if not row:

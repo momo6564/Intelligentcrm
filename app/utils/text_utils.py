@@ -31,4 +31,11 @@ def norm_state(value: str) -> str:
     upper = raw.upper()
     if upper in Config.STATE_ABBR:
         return Config.STATE_ABBR[upper]
+    lowered = raw.lower()
+    for state_name in Config.US_STATES:
+        if state_name.lower() in lowered:
+            return state_name
+    for abbr, state_name in Config.STATE_ABBR.items():
+        if re.search(rf"\b{re.escape(abbr.lower())}\b", lowered):
+            return state_name
     return ""

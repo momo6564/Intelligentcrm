@@ -1,6 +1,7 @@
 from flask import Blueprint, request, render_template, redirect
 from ..auth import login_required, get_session_user
 from ..database import get_connection, ensure_institutions_table, ensure_chapters_table, ensure_crm_tables
+from ..research_memory import research_placeholder_hints
 from ..services.institutions import fetch_institution_profile
 from ..utils.text_utils import clean_text
 from ..utils.workspace import workspace_id_for_user
@@ -50,7 +51,14 @@ def institution_detail_page():
                 error = "Institution not found."
         else:
             error = "Institution not found."
-    return render_app("explorer/institution_detail.html", institution=institution, chapters=chapters, my_status=my_status, error=error)
+    return render_app(
+        "explorer/institution_detail.html",
+        institution=institution,
+        chapters=chapters,
+        my_status=my_status,
+        error=error,
+        research_placeholder_hints=research_placeholder_hints("institution"),
+    )
 
 
 @bp.route("/ui/institution-drawer")

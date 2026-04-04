@@ -1,0 +1,442 @@
+{% extends "layouts/app_shell.html" %}
+{% block title %}Ops Studio{% endblock %}
+{% block page_title %}Ops Studio{% endblock %}
+{% block page_subtitle %}Planner-first order management with drawers for creating orders and editing order-only processes{% endblock %}
+{% block main_grid %}xl:grid-cols-1{% endblock %}
+{% block context_panel %}{% endblock %}
+{% block content %}
+<div x-data x-init="$store.opsStudio.init({{ order_id|tojson }}, {{ 1 if can_edit_order else 0 }})" class="space-y-4">
+  <div class="panel p-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Order Management</div>
+        <h2 class="text-xl font-semibold text-slate-900">Manage orders from one calendar view and open actions from right-side drawers.</h2>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <a href="/crm" class="btn-ghost px-3 py-2 text-sm">CRM</a>
+        <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="$store.opsStudio.loadHub(true)">Refresh</button>
+        {% if can_edit_order %}
+        <button type="button" class="btn-primary px-4 py-2 text-sm" @click="$store.opsStudio.openCreateDrawer()">New Order</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+    <section class="panel overflow-hidden">
+      <div class="border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Orders</div>
+        <div class="mt-2 grid gap-2">
+          <input x-model="$store.opsStudio.orderSearch" placeholder="Search order, customer, stage" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" class="btn-ghost px-3 py-2 text-xs" :class="$store.opsStudio.stageFilter==='all' ? '!bg-[#1d68ee] !text-white !border-[#1d68ee]' : ''" @click="$store.opsStudio.stageFilter='all'">All</button>
+            <button type="button" class="btn-ghost px-3 py-2 text-xs" :class="$store.opsStudio.stageFilter==='overdue' ? '!bg-[#b93857] !text-white !border-[#b93857]' : ''" @click="$store.opsStudio.stageFilter='overdue'">Missed Days</button>
+          </div>
+        </div>
+      </div>
+      <div class="max-h-[calc(100vh-18rem)] space-y-3 overflow-auto p-4">
+        <template x-for="row in $store.opsStudio.filteredOrders()" :key="row.id">
+          <button type="button" class="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left"
+            :class="$store.opsStudio.selectedOrderId===Number(row.id) ? 'ring-2 ring-[#1d68ee] border-[#1d68ee]' : (Number(row.overdue_day_count || 0) > 0 ? 'bg-rose-50/70 border-rose-200' : '')"
+            @click="$store.opsStudio.loadOrder(row.id)">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold text-slate-900" x-text="row.order_number"></div>
+                <div class="mt-1 text-sm text-slate-500" x-text="row.title"></div>
+              </div>
+              <span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="$store.opsStudio.stageBadge(row)" x-text="row.current_stage_name || 'No stage'"></span>
+            </div>
+            <div class="mt-3 space-y-1 text-xs text-slate-500">
+              <div x-text="row.client_name || row.customer_name || '-'"></div>
+              <div x-text="row.today_schedule_label || row.last_update_summary || 'No daily plan yet'"></div>
+              <div x-show="Number(row.overdue_day_count || 0) > 0" class="font-semibold text-rose-600" x-text="`${row.overdue_day_count} missed planned day(s)`"></div>
+            </div>
+          </button>
+        </template>
+        <div x-show="$store.opsStudio.filteredOrders().length===0" class="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">No orders match the current filter.</div>
+      </div>
+    </section>
+
+    <section class="space-y-4">
+      <template x-if="!$store.opsStudio.order">
+        <div class="panel grid min-h-[28rem] place-items-center p-8 text-center">
+          <div class="max-w-xl space-y-3">
+            <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Planner Ready</div>
+            <h3 class="text-2xl font-semibold text-slate-900">Select an order to open its calendar, or create one from the drawer.</h3>
+            {% if can_edit_order %}<button type="button" class="btn-primary px-4 py-2 text-sm" @click="$store.opsStudio.openCreateDrawer()">Create Order</button>{% endif %}
+          </div>
+        </div>
+      </template>
+
+      <template x-if="$store.opsStudio.order">
+        <div class="space-y-4">
+          <div class="grid gap-4 xl:grid-cols-[1.45fr_.95fr]">
+            <div class="panel p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Selected Order</div>
+                  <h3 class="mt-1 text-2xl font-semibold text-slate-900" x-text="`${$store.opsStudio.order.order_number} · ${$store.opsStudio.order.title}`"></h3>
+                  <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500">
+                    <span x-text="`Customer: ${$store.opsStudio.order.client_name || $store.opsStudio.order.customer_name || '-'}`"></span>
+                    <span x-text="`Stage: ${$store.opsStudio.order.current_stage_name || '-'}`"></span>
+                    <span x-text="`Tracking code: ${$store.opsStudio.order.customer_access_code || '-'}`"></span>
+                  </div>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  {% if can_edit_order %}
+                  <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="$store.opsStudio.openProcessDrawer()">Edit Processes</button>
+                  <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="$store.opsStudio.autoBuild()">Auto Distribute</button>
+                  <button type="button" class="btn-primary px-3 py-2 text-sm" @click="$store.opsStudio.saveCalendar()">Save Calendar</button>
+                  <button type="button" class="btn-ghost px-3 py-2 text-sm" @click="$store.opsStudio.advanceOrder()">Complete Current Stage</button>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div class="text-xs uppercase tracking-[0.16em] text-slate-500">Planned Days</div>
+                  <div class="mt-2 flex items-end gap-2">
+                    {% if can_edit_order %}
+                    <input type="number" min="1" max="60" x-model="$store.opsStudio.plannedDurationDays" class="w-24 rounded-xl border border-slate-300 px-3 py-2 text-lg font-semibold">
+                    {% else %}
+                    <div class="text-2xl font-semibold" x-text="$store.opsStudio.summary.planned_duration_days || 0"></div>
+                    {% endif %}
+                    <span class="pb-1 text-xs text-slate-500">Max 60</span>
+                  </div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="text-xs uppercase tracking-[0.16em] text-slate-500">Today</div><div class="mt-2 text-base font-semibold text-slate-900" x-text="$store.opsStudio.summary.today_schedule_label || 'No activity scheduled'"></div></div>
+                <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="text-xs uppercase tracking-[0.16em] text-slate-500">Missed Days</div><div class="mt-2 text-2xl font-semibold text-rose-700" x-text="$store.opsStudio.summary.overdue_day_count || 0"></div></div>
+                <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="text-xs uppercase tracking-[0.16em] text-slate-500">Buffer Days</div><div class="mt-2 text-2xl font-semibold text-amber-700" x-text="$store.opsStudio.summary.buffer_day_count || 0"></div></div>
+              </div>
+            </div>
+
+            <div class="panel p-4">
+              <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Quick Actions</div>
+              <div class="mt-3 space-y-4">
+                <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div class="text-sm font-semibold text-slate-900">Daily Update</div>
+                  <div class="mt-3 space-y-2">
+                    <textarea x-model="$store.opsStudio.newUpdate.summary" rows="2" placeholder="What happened today?" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+                    <input x-model="$store.opsStudio.newUpdate.completed_today" placeholder="Completed today" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                    <input x-model="$store.opsStudio.newUpdate.next_step" placeholder="Next step" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                    {% if can_edit_order %}<button type="button" class="btn-primary w-full px-3 py-2 text-sm" @click="$store.opsStudio.addUpdate()">Save Update</button>{% endif %}
+                  </div>
+                </div>
+                <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div class="text-sm font-semibold text-slate-900">Delay / Issue</div>
+                  <div class="mt-3 space-y-2">
+                    <input x-model="$store.opsStudio.newIssue.summary" placeholder="Issue summary" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                    <textarea x-model="$store.opsStudio.newIssue.reason" rows="2" placeholder="Reason" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+                    <input type="date" x-model="$store.opsStudio.newIssue.revised_due_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                    {% if can_edit_order %}<button type="button" class="btn-ghost w-full px-3 py-2 text-sm" @click="$store.opsStudio.addIssue()">Save Delay</button>{% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel overflow-hidden">
+            <div class="border-b border-slate-200 bg-slate-50 px-4 py-3 flex items-center justify-between gap-3">
+              <div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">Daily Calendar</div><h3 class="text-lg font-semibold">Full Order Schedule</h3></div>
+              <div class="text-xs text-slate-500" x-text="`${$store.opsStudio.rows.length || 0} scheduled days`"></div>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="table-head text-xs uppercase text-slate-500"><tr><th class="px-3 py-2 text-left">Day</th><th class="px-3 py-2 text-left">Date</th><th class="px-3 py-2 text-left">State</th><th class="px-3 py-2 text-left">Process</th><th class="px-3 py-2 text-left">Department</th><th class="px-3 py-2 text-left">Notes</th></tr></thead>
+                <tbody>
+                  <template x-for="row in $store.opsStudio.rows" :key="row.day_index">
+                    <tr class="border-b border-slate-100" :class="$store.opsStudio.rowClass(row)">
+                      <td class="px-3 py-2 font-semibold" x-text="`Day ${row.day_index}`"></td>
+                      <td class="px-3 py-2" x-text="row.schedule_date"></td>
+                      <td class="px-3 py-2"><span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="$store.opsStudio.statePill(row)" x-text="$store.opsStudio.stateLabel(row)"></span></td>
+                      <td class="min-w-[18rem] px-3 py-2">
+                        {% if can_edit_order %}
+                        <select x-model="row.selected_stage_id" @change="$store.opsStudio.onStageChange(row)" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="__buffer__">Buffer / Free Day</option><template x-for="stage in $store.opsStudio.stages" :key="stage.id"><option :value="String(stage.id)" x-text="stage.stage_name"></option></template></select>
+                        {% else %}
+                        <div x-text="row.stage_name || 'Buffer / Free Day'"></div>
+                        {% endif %}
+                      </td>
+                      <td class="px-3 py-2" x-text="row.department || '-'"></td>
+                      <td class="min-w-[14rem] px-3 py-2">{% if can_edit_order %}<input x-model="row.notes" placeholder="Optional note" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">{% else %}<div x-text="row.notes || '-'"></div>{% endif %}</td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-3">
+            <div class="panel p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div><div class="text-xs uppercase tracking-[0.2em] text-slate-500">Processes</div><div class="text-lg font-semibold">Order Workflow</div></div>
+                {% if can_edit_order %}<button type="button" class="btn-ghost px-3 py-2 text-xs" @click="$store.opsStudio.openProcessDrawer()">Edit</button>{% endif %}
+              </div>
+              <div class="mt-3 space-y-2"><template x-for="stage in $store.opsStudio.stages" :key="stage.id"><div class="rounded-2xl border border-slate-200 bg-white p-3"><div class="flex items-center justify-between gap-3"><div class="text-sm font-medium text-slate-900" x-text="stage.stage_name"></div><span class="inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="$store.opsStudio.stageBadge(stage)" x-text="$store.opsStudio.stageStatusLabel(stage)"></span></div><div class="mt-1 text-xs text-slate-500" x-text="stage.department || 'No department'"></div></div></template></div>
+            </div>
+            <div class="panel p-4">
+              <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Recent Updates</div>
+              <div class="mt-3 space-y-2"><template x-for="row in $store.opsStudio.updates" :key="row.id"><div class="rounded-2xl border border-slate-200 bg-white p-3"><div class="text-sm font-medium text-slate-900" x-text="row.summary"></div><div class="mt-1 text-xs text-slate-500" x-text="row.completed_today || '-'"></div><div class="mt-1 text-[11px] text-slate-400" x-text="`${row.update_date || '-'} · ${row.next_step || 'No next step logged'}`"></div></div></template></div>
+            </div>
+            <div class="panel p-4">
+              <div class="text-xs uppercase tracking-[0.2em] text-slate-500">Messages</div>
+              <div class="mt-3 space-y-2">
+                <div class="max-h-[14rem] space-y-2 overflow-auto"><template x-for="row in $store.opsStudio.comments" :key="row.id"><div class="rounded-2xl border border-slate-200 bg-white p-3"><div class="flex items-center justify-between gap-2"><div class="text-sm font-medium text-slate-900" x-text="row.author_name || row.author_role"></div><div class="text-[11px] text-slate-400" x-text="row.created_at"></div></div><div class="mt-1 text-sm text-slate-700" x-text="row.message"></div></div></template></div>
+                {% if can_edit_order %}<textarea x-model="$store.opsStudio.newMessage" rows="2" placeholder="Reply to the customer..." class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea><button type="button" class="btn-primary w-full px-3 py-2 text-sm" @click="$store.opsStudio.sendMessage()">Send Message</button>{% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+  </div>
+
+  <div x-show="$store.opsStudio.drawerOpen" x-cloak class="fixed inset-0 z-40">
+    <div class="absolute inset-0 bg-slate-900/45" @click="$store.opsStudio.closeDrawer()"></div>
+    <div class="absolute inset-y-0 right-0 w-full max-w-[34rem] overflow-y-auto border-l border-slate-200 bg-white shadow-2xl">
+      <div class="sticky top-0 z-10 border-b border-slate-200 px-6 py-5 text-white" :class="$store.opsStudio.drawerMode==='create' ? 'bg-[#0d7686]' : 'bg-[#1559a6]'">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-xs uppercase tracking-[0.2em] text-white/75" x-text="$store.opsStudio.drawerMode==='create' ? 'Create Order' : 'Order Processes'"></div>
+            <div class="text-2xl font-semibold" x-text="$store.opsStudio.drawerMode==='create' ? 'New Production Order' : 'Edit This Order\\'s Workflow'"></div>
+          </div>
+          <button type="button" class="rounded-full border border-white/20 px-3 py-1 text-sm font-semibold" @click="$store.opsStudio.closeDrawer()">Close</button>
+        </div>
+      </div>
+      <template x-if="$store.opsStudio.drawerMode==='create'">
+        <div class="space-y-4 p-6">
+          <select x-model="$store.opsStudio.newOrder.crm_contact_id" @change="$store.opsStudio.applyCrmContact()" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Choose CRM contact</option><template x-for="row in $store.opsStudio.dashboard.crm_contacts" :key="row.id"><option :value="row.id" x-text="`${row.name} | ${(row.status || 'prospect').replace('_',' ')}`"></option></template></select>
+          <input x-model="$store.opsStudio.newOrder.order_number" placeholder="Order number (leave blank to auto-assign)" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <input x-model="$store.opsStudio.newOrder.title" placeholder="Order title" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <input x-model="$store.opsStudio.newOrder.client_name" placeholder="Customer name" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <input x-model="$store.opsStudio.newOrder.crm_connection" placeholder="CRM connection" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" readonly>
+          <input x-model="$store.opsStudio.newOrder.product_type" placeholder="Product type" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <input type="number" x-model="$store.opsStudio.newOrder.quantity" placeholder="Quantity" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <div class="grid gap-3 sm:grid-cols-2"><input type="date" x-model="$store.opsStudio.newOrder.planned_start_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><input type="number" min="1" max="60" x-model="$store.opsStudio.newOrder.planned_duration_days" placeholder="Completion days" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></div>
+          <input type="date" x-model="$store.opsStudio.newOrder.requested_delivery_date" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">
+          <select x-model="$store.opsStudio.newOrder.priority" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="normal">Normal Priority</option><option value="high">High Priority</option><option value="low">Low Priority</option></select>
+          <select x-model="$store.opsStudio.newOrder.brand_owner_workspace_id" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><option value="">Share later or keep internal</option><template x-for="row in $store.opsStudio.dashboard.linked_brand_owners" :key="row.brand_owner_workspace_id"><option :value="row.brand_owner_workspace_id" x-text="`Share to ${row.brand_owner_name}`"></option></template></select>
+          <textarea x-model="$store.opsStudio.newOrder.order_summary" rows="4" placeholder="Order summary and customer commitments" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></textarea>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">New orders still start from the default workflow template. Later edits only change this order’s processes.</div>
+          <div class="flex items-center justify-end gap-2"><button type="button" class="btn-ghost px-4 py-2 text-sm" @click="$store.opsStudio.closeDrawer()">Cancel</button><button type="button" class="btn-primary px-4 py-2 text-sm" @click="$store.opsStudio.createOrder()">Create Order</button></div>
+        </div>
+      </template>
+      <template x-if="$store.opsStudio.drawerMode==='processes'">
+        <div class="space-y-4 p-6">
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">These changes stay on this order only. The default workflow for future orders remains untouched.</div>
+          <div class="space-y-3">
+            <template x-for="(stage, index) in $store.opsStudio.processForm" :key="stage.local_key">
+              <div class="rounded-2xl border border-slate-200 bg-white p-4"><div class="mb-3 text-xs uppercase tracking-[0.16em] text-slate-500" x-text="`Process ${index + 1}`"></div><div class="grid gap-3"><input x-model="stage.stage_name" placeholder="Process name" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"><input x-model="stage.department" placeholder="Department" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"></div></div>
+            </template>
+          </div>
+          {% if can_edit_order %}<button type="button" class="btn-ghost w-full px-4 py-3 text-sm" @click="$store.opsStudio.addProcessRow()">Add Another Process</button>{% endif %}
+          <div class="flex items-center justify-between gap-2"><button type="button" class="btn-ghost px-4 py-2 text-sm" @click="$store.opsStudio.autoBuild()">Auto Rebuild Calendar</button><div class="flex items-center gap-2"><button type="button" class="btn-ghost px-4 py-2 text-sm" @click="$store.opsStudio.closeDrawer()">Cancel</button><button type="button" class="btn-primary px-4 py-2 text-sm" @click="$store.opsStudio.saveProcesses()">Save Processes</button></div></div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener("alpine:init", () => {
+  Alpine.store("opsStudio", {
+    initialOrderId:0,
+    canEdit:false,
+    loading:false,
+    selectedOrderId:0,
+    orderSearch:"",
+    stageFilter:"all",
+    drawerOpen:false,
+    drawerMode:"create",
+    dashboard:{orders:[], crm_contacts:[], linked_brand_owners:[], kpis:{}},
+    order:null,
+    stages:[],
+    rows:[],
+    updates:[],
+    issues:[],
+    comments:[],
+    summary:{planned_duration_days:0, buffer_day_count:0, overdue_day_count:0, today_schedule_label:"", default_available:0},
+    plannedDurationDays:1,
+    newMessage:"",
+    newUpdate:{summary:"", completed_today:"", next_step:""},
+    newIssue:{summary:"", reason:"", revised_due_date:""},
+    newOrder:{crm_contact_id:"", order_number:"", title:"", client_name:"", crm_connection:"", customer_email:"", product_type:"", quantity:"", planned_start_date:"", planned_duration_days:"", requested_delivery_date:"", priority:"normal", brand_owner_workspace_id:"", order_summary:""},
+    processForm:[],
+    init(orderId, canEdit){
+      this.initialOrderId = Number(orderId || 0);
+      this.canEdit = Number(canEdit || 0) === 1;
+      this.loadHub();
+    },
+    resetCreateForm(){
+      this.newOrder = {crm_contact_id:"", order_number:"", title:"", client_name:"", crm_connection:"", customer_email:"", product_type:"", quantity:"", planned_start_date:"", planned_duration_days:"", requested_delivery_date:"", priority:"normal", brand_owner_workspace_id:"", order_summary:""};
+    },
+    openCreateDrawer(){ this.resetCreateForm(); this.drawerMode = "create"; this.drawerOpen = true; },
+    openProcessDrawer(){
+      if(!this.order) return;
+      this.drawerMode = "processes";
+      this.processForm = (this.stages || []).map((stage) => ({id: stage.id, local_key: `stage-${stage.id}`, stage_name: stage.stage_name || "", department: stage.department || ""}));
+      this.drawerOpen = true;
+    },
+    closeDrawer(){ this.drawerOpen = false; },
+    addProcessRow(){
+      this.processForm.push({id:null, local_key:`new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, stage_name:"", department:""});
+    },
+    filteredOrders(){
+      const q = this.orderSearch.trim().toLowerCase();
+      return (this.dashboard.orders || []).filter((row) => {
+        if(this.stageFilter === "overdue" && Number(row.overdue_day_count || 0) <= 0) return false;
+        if(!q) return true;
+        return [row.order_number, row.title, row.client_name, row.customer_name, row.current_stage_name].some((value) => String(value || "").toLowerCase().includes(q));
+      });
+    },
+    stageBadge(row){
+      const status = String((row && (row.current_stage_status || row.status)) || "").toLowerCase();
+      if(Number((row && row.overdue_day_count) || 0) > 0) return "bg-rose-50 text-rose-700";
+      if(status === "completed") return "bg-emerald-50 text-emerald-700";
+      if(status === "in_progress") return "bg-blue-50 text-blue-700";
+      if(status === "blocked") return "bg-rose-50 text-rose-700";
+      return "bg-amber-50 text-amber-700";
+    },
+    stageStatusLabel(stage){ return String((stage && stage.status) || "pending").replaceAll("_", " "); },
+    stateLabel(row){
+      if(Number(row.is_overdue || 0) === 1) return "Missed";
+      if(Number(row.is_today || 0) === 1) return "Today";
+      if(Number(row.is_completed || 0) === 1) return "Completed";
+      if(Number(row.is_buffer_day || 0) === 1) return "Buffer";
+      return "Planned";
+    },
+    statePill(row){
+      if(Number(row.is_overdue || 0) === 1) return "bg-rose-50 text-rose-700";
+      if(Number(row.is_today || 0) === 1) return "bg-blue-50 text-blue-700";
+      if(Number(row.is_completed || 0) === 1) return "bg-emerald-50 text-emerald-700";
+      if(Number(row.is_buffer_day || 0) === 1) return "bg-amber-50 text-amber-700";
+      return "bg-slate-100 text-slate-700";
+    },
+    rowClass(row){
+      if(Number(row.is_overdue || 0) === 1) return "bg-rose-50/70";
+      if(Number(row.is_today || 0) === 1) return "bg-blue-50/50";
+      if(Number(row.is_buffer_day || 0) === 1) return "bg-amber-50/40";
+      return "";
+    },
+    normalizeRows(rows){
+      return (rows || []).map((row) => ({...row, selected_stage_id: Number(row.is_buffer_day || 0) === 1 ? "__buffer__" : String(row.order_stage_id || ""), notes: row.notes || ""}));
+    },
+    hydratePlanner(payload){
+      this.order = payload.order || null;
+      this.selectedOrderId = Number((payload.order || {}).id || 0);
+      this.stages = payload.stages || [];
+      this.rows = this.normalizeRows(payload.schedule_days || []);
+      this.updates = payload.updates || [];
+      this.issues = payload.issues || [];
+      this.comments = payload.comments || [];
+      this.summary = payload.schedule_summary || this.summary;
+      this.plannedDurationDays = Number(this.summary.planned_duration_days || this.rows.length || 1);
+      this.newMessage = "";
+      this.newUpdate = {summary:"", completed_today:"", next_step:""};
+      this.newIssue = {summary:"", reason:"", revised_due_date:""};
+    },
+    async loadHub(force=false){
+      if(this.loading && !force) return;
+      this.loading = true;
+      try{
+        const dash = await fetch("/api/ops/dashboard").then((r) => r.json());
+        if(!dash.ok){ (window.appToast || alert)(dash.error || "Could not load ops workspace", "error"); return; }
+        this.dashboard = dash;
+        const desired = this.initialOrderId || this.selectedOrderId || Number((dash.orders || [])[0]?.id || 0);
+        if(desired){ await this.loadOrder(desired); } else { this.order = null; }
+      }finally{ this.loading = false; }
+    },
+    async loadOrder(orderId){
+      const out = await fetch(`/api/ops/orders/${orderId}/planner`).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not load order planner", "error"); return; }
+      this.initialOrderId = Number(orderId || 0);
+      this.hydratePlanner(out);
+      window.history.replaceState({}, "", `/ops/orders/${orderId}/planner`);
+    },
+    applyCrmContact(){
+      const crmId = Number(this.newOrder.crm_contact_id || 0);
+      const row = (this.dashboard.crm_contacts || []).find((item) => Number(item.id || 0) === crmId);
+      if(!row) return;
+      this.newOrder.client_name = row.name || this.newOrder.client_name;
+      this.newOrder.crm_connection = row.connection || "";
+      if(!this.newOrder.order_summary && row.notes){ this.newOrder.order_summary = row.notes; }
+    },
+    async createOrder(){
+      const out = await fetch("/api/ops/orders", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(this.newOrder)}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not create order", "error"); return; }
+      this.closeDrawer();
+      await this.loadHub(true);
+      await this.loadOrder(out.order_id);
+      (window.appToast || alert)("Order created and opened in the planner", "success");
+    },
+    onStageChange(row){
+      if(String(row.selected_stage_id) === "__buffer__"){ row.is_buffer_day = 1; row.order_stage_id = 0; row.stage_name = ""; row.department = ""; return; }
+      const stage = (this.stages || []).find((item) => String(item.id) === String(row.selected_stage_id));
+      row.is_buffer_day = 0;
+      row.order_stage_id = stage ? Number(stage.id || 0) : 0;
+      row.stage_name = stage ? (stage.stage_name || "") : "";
+      row.department = stage ? (stage.department || "") : "";
+    },
+    payloadRows(){
+      return (this.rows || []).map((row) => ({order_stage_id: String(row.selected_stage_id) === "__buffer__" ? null : Number(row.selected_stage_id || 0), is_buffer_day: String(row.selected_stage_id) === "__buffer__" ? 1 : 0, notes: row.notes || ""}));
+    },
+    async saveCalendar(){
+      if(!this.order) return;
+      const out = await fetch(`/api/ops/orders/${this.order.id}/planner`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({schedule_days:this.payloadRows()})}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not save calendar", "error"); return; }
+      await this.loadHub(true);
+      await this.loadOrder(this.order.id);
+      (window.appToast || alert)("Calendar saved", "success");
+    },
+    async autoBuild(){
+      if(!this.order) return;
+      const out = await fetch(`/api/ops/orders/${this.order.id}/planner/auto`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({planned_duration_days:this.plannedDurationDays, use_saved_default:true})}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not rebuild calendar", "error"); return; }
+      await this.loadHub(true);
+      await this.loadOrder(this.order.id);
+      (window.appToast || alert)("Calendar auto-distributed again", "success");
+    },
+    async saveProcesses(){
+      if(!this.order) return;
+      const stages = (this.processForm || []).map((row) => ({id: row.id, stage_name: row.stage_name || "", department: row.department || ""})).filter((row) => row.stage_name.trim());
+      const out = await fetch(`/api/ops/orders/${this.order.id}/processes`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({stages})}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not save processes", "error"); return; }
+      this.closeDrawer();
+      await this.loadHub(true);
+      await this.loadOrder(this.order.id);
+      (window.appToast || alert)("Order-specific processes saved", "success");
+    },
+    async advanceOrder(){
+      if(!this.order) return;
+      const out = await fetch(`/api/ops/orders/${this.order.id}/advance`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({})}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not advance order", "error"); return; }
+      await this.loadHub(true);
+      await this.loadOrder(this.order.id);
+      (window.appToast || alert)("Moved the order to the next process", "success");
+    },
+    async addUpdate(){
+      if(!this.order) return;
+      const out = await fetch(`/api/ops/orders/${this.order.id}/updates`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(this.newUpdate)}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not add update", "error"); return; }
+      await this.loadHub(true);
+      await this.loadOrder(this.order.id);
+      (window.appToast || alert)("Daily update logged", "success");
+    },
+    async addIssue(){
+      if(!this.order) return;
+      const out = await fetch(`/api/ops/orders/${this.order.id}/issues`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(this.newIssue)}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not save delay", "error"); return; }
+      await this.loadHub(true);
+      await this.loadOrder(this.order.id);
+      (window.appToast || alert)("Delay saved", "success");
+    },
+    async sendMessage(){
+      if(!this.order || !this.newMessage.trim()) return;
+      const out = await fetch(`/api/ops/orders/${this.order.id}/messages`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({message:this.newMessage.trim()})}).then((r) => r.json());
+      if(!out.ok){ (window.appToast || alert)(out.error || "Could not send message", "error"); return; }
+      await this.loadOrder(this.order.id);
+      this.newMessage = "";
+      (window.appToast || alert)("Message sent", "success");
+    }
+  });
+});
+</script>
+{% endblock %}

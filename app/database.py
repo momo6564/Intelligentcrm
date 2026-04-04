@@ -2,6 +2,7 @@ import sqlite3
 import os
 import csv
 import re
+from difflib import SequenceMatcher
 from flask import g
 from werkzeug.security import generate_password_hash
 from .config import Config
@@ -140,6 +141,18 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS brand_owners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            contact_email TEXT,
+            workspace_id TEXT UNIQUE NOT NULL,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS manufacturer_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             manufacturer_id INTEGER,
@@ -157,6 +170,19 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
             quantity INTEGER,
             notes TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS manufacturer_brand_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            manufacturer_workspace_id TEXT NOT NULL,
+            brand_owner_workspace_id TEXT NOT NULL,
+            brand_owner_name TEXT,
+            linked_by_user_id INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(manufacturer_workspace_id, brand_owner_workspace_id)
         )
         """
     )
@@ -333,6 +359,36 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ops_order_brand_access (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            manufacturer_workspace_id TEXT NOT NULL,
+            brand_owner_workspace_id TEXT NOT NULL,
+            granted_by_user_id INTEGER,
+            status TEXT DEFAULT 'active',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(order_id, brand_owner_workspace_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_research_prompts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            workspace_id TEXT,
+            category TEXT NOT NULL,
+            slot_index INTEGER NOT NULL,
+            label TEXT NOT NULL,
+            prompt_text TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, category, slot_index)
+        )
+        """
+    )
 
     vendor_order_columns = {row[1] for row in conn.execute("PRAGMA table_info(vendor_orders)").fetchall()}
     if "order_type" not in vendor_order_columns:
@@ -355,8 +411,12 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN role TEXT")
     if "manufacturer_id" not in users_columns:
         conn.execute("ALTER TABLE users ADD COLUMN manufacturer_id INTEGER")
+    if "brand_owner_id" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN brand_owner_id INTEGER")
     if "workspace_id" not in users_columns:
         conn.execute("ALTER TABLE users ADD COLUMN workspace_id TEXT")
+    if "account_type" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN account_type TEXT")
     if "security_question" not in users_columns:
         conn.execute("ALTER TABLE users ADD COLUMN security_question TEXT")
     if "security_answer_hash" not in users_columns:
@@ -371,6 +431,7 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
     if "email" not in users_columns:
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    conn.execute("UPDATE users SET account_type='manufacturer' WHERE trim(coalesce(account_type,''))=''")
     crm_contact_columns = {row[1] for row in conn.execute("PRAGMA table_info(crm_contacts)").fetchall()}
     if "workspace_id" not in crm_contact_columns:
         conn.execute("ALTER TABLE crm_contacts ADD COLUMN workspace_id TEXT")
@@ -418,6 +479,12 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE feedback_messages ADD COLUMN user_id INTEGER")
     if "workspace_id" not in feedback_columns:
         conn.execute("ALTER TABLE feedback_messages ADD COLUMN workspace_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_brand_owners_workspace ON brand_owners(workspace_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_account_type ON users(account_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_manufacturer_brand_links_mw ON manufacturer_brand_links(manufacturer_workspace_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_manufacturer_brand_links_bw ON manufacturer_brand_links(brand_owner_workspace_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ops_order_brand_access_bw ON ops_order_brand_access(brand_owner_workspace_id, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ops_order_brand_access_order ON ops_order_brand_access(order_id, status)")
     if "page_url" not in feedback_columns:
         conn.execute("ALTER TABLE feedback_messages ADD COLUMN page_url TEXT")
     if "page_title" not in feedback_columns:
@@ -441,6 +508,11 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE crm_activities ADD COLUMN workspace_id TEXT")
     if "source" not in crm_activities_columns:
         conn.execute("ALTER TABLE crm_activities ADD COLUMN source TEXT")
+    research_prompt_columns = {row[1] for row in conn.execute("PRAGMA table_info(user_research_prompts)").fetchall()}
+    if "workspace_id" not in research_prompt_columns:
+        conn.execute("ALTER TABLE user_research_prompts ADD COLUMN workspace_id TEXT")
+    if "updated_at" not in research_prompt_columns:
+        conn.execute("ALTER TABLE user_research_prompts ADD COLUMN updated_at TEXT")
 
     # Ensure every user has a stable workspace_id to preserve CRM ownership across sessions.
     missing_ws_users = conn.execute(
@@ -534,6 +606,7 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_activities_workspace_contact ON crm_activities(workspace_id, crm_contact_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_activities_workspace_action ON crm_activities(workspace_id, action, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contact_tags_workspace_contact ON crm_contact_tags(workspace_id, crm_contact_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_research_prompts_user_category ON user_research_prompts(user_id, category)")
     conn.commit()
 
 def derive_workspace_id(account_name: str = "", username: str = "", user_id: int = 0) -> str:
@@ -881,6 +954,214 @@ def ensure_vendor_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vendor_name ON vendors(vendor)")
     conn.commit()
 
+
+INSTITUTION_MATCH_JOINERS = {"the", "of", "at", "and", "for"}
+
+
+def _institution_match_tokens(value: object) -> list[str]:
+    text = clean_text(value).lower()
+    if not text:
+        return []
+    text = text.replace("&", " and ").replace("-", " ")
+    text = re.sub(r"\buniv[.]?\b", "university", text)
+    text = re.sub(r"\bst[.]?(?=\s+[a-z])", "saint", text)
+    return [
+        token
+        for token in re.findall(r"[a-z0-9]+", text)
+        if token and token not in INSTITUTION_MATCH_JOINERS
+    ]
+
+
+def _institution_match_key(value: object) -> str:
+    return " ".join(_institution_match_tokens(value))
+
+
+def _institution_name_variants(row: sqlite3.Row | dict) -> list[dict]:
+    seen = set()
+    variants = []
+    for field in ("location_name", "alias", "parent_name"):
+        raw = clean_text(row[field]) if isinstance(row, sqlite3.Row) else clean_text(row.get(field))
+        if not raw:
+            continue
+        pieces = [raw]
+        if field == "alias":
+            pieces.extend([clean_text(part) for part in re.split(r"\|+|;+|\n+", raw) if clean_text(part)])
+        for piece in pieces:
+            key = _institution_match_key(piece)
+            compact = norm_org(piece)
+            if not key and not compact:
+                continue
+            marker = (key, compact)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            variants.append(
+                {
+                    "raw": piece,
+                    "key": key,
+                    "compact": compact,
+                    "tokens": set(key.split()) if key else set(),
+                }
+            )
+    return variants
+
+
+def _build_institution_match_index(inst_rows: list[sqlite3.Row]) -> dict:
+    all_rows = []
+    by_state = {}
+    exact_lookup = {}
+    key_lookup = {}
+
+    for row in inst_rows:
+        state_name = norm_state(row["state"])
+        state_code = ""
+        if state_name:
+            for abbr, full_name in Config.STATE_ABBR.items():
+                if full_name == state_name:
+                    state_code = abbr
+                    break
+        item = {
+            "id": int(row["id"]),
+            "location_name": clean_text(row["location_name"]),
+            "alias": clean_text(row["alias"]) if "alias" in row.keys() else "",
+            "parent_name": clean_text(row["parent_name"]) if "parent_name" in row.keys() else "",
+            "city": clean_text(row["city"]) if "city" in row.keys() else "",
+            "state": state_name,
+            "state_code": state_code,
+            "variants": _institution_name_variants(row),
+        }
+        if not item["variants"]:
+            continue
+        all_rows.append(item)
+        if state_code:
+            by_state.setdefault(state_code, []).append(item)
+        for variant in item["variants"]:
+            if variant["compact"]:
+                exact_lookup.setdefault((state_code, variant["compact"]), set()).add(item["id"])
+                exact_lookup.setdefault(("", variant["compact"]), set()).add(item["id"])
+            if variant["key"]:
+                key_lookup.setdefault((state_code, variant["key"]), set()).add(item["id"])
+                key_lookup.setdefault(("", variant["key"]), set()).add(item["id"])
+
+    return {
+        "all_rows": all_rows,
+        "by_state": by_state,
+        "exact_lookup": exact_lookup,
+        "key_lookup": key_lookup,
+    }
+
+
+def _match_chapter_to_institution(
+    school: object,
+    state: object,
+    city: object,
+    match_index: dict,
+) -> int | None:
+    school_text = clean_text(school)
+    school_compact = norm_org(school_text)
+    school_key = _institution_match_key(school_text)
+    school_tokens = set(school_key.split()) if school_key else set()
+    if not school_compact and not school_key:
+        return None
+
+    state_name = norm_state(state)
+    state_code = ""
+    if state_name:
+        for abbr, full_name in Config.STATE_ABBR.items():
+            if full_name == state_name:
+                state_code = abbr
+                break
+    city_text = clean_text(city).lower()
+
+    for lookup, probe in (
+        (match_index["exact_lookup"], school_compact),
+        (match_index["key_lookup"], school_key),
+    ):
+        if not probe:
+            continue
+        state_matches = lookup.get((state_code, probe), set()) if state_code else set()
+        if len(state_matches) == 1:
+            return next(iter(state_matches))
+        global_matches = lookup.get(("", probe), set())
+        if len(global_matches) == 1:
+            return next(iter(global_matches))
+
+    candidates = match_index["by_state"].get(state_code) if state_code else None
+    if not candidates:
+        candidates = match_index["all_rows"]
+
+    scored = []
+    for candidate in candidates:
+        best_variant_score = 0.0
+        for variant in candidate["variants"]:
+            if school_key and variant["key"] and school_key == variant["key"]:
+                best_variant_score = max(best_variant_score, 0.985)
+            if school_tokens and variant["tokens"]:
+                overlap = school_tokens & variant["tokens"]
+                if len(overlap) >= 2 and (
+                    school_tokens.issubset(variant["tokens"]) or variant["tokens"].issubset(school_tokens)
+                ):
+                    best_variant_score = max(best_variant_score, 0.915)
+            compact_ratio = (
+                SequenceMatcher(None, school_compact, variant["compact"]).ratio()
+                if school_compact and variant["compact"]
+                else 0.0
+            )
+            key_ratio = (
+                SequenceMatcher(None, school_key, variant["key"]).ratio()
+                if school_key and variant["key"]
+                else 0.0
+            )
+            best_variant_score = max(best_variant_score, compact_ratio, key_ratio)
+
+        if best_variant_score <= 0:
+            continue
+        if city_text and clean_text(candidate["city"]).lower() == city_text:
+            best_variant_score += 0.035
+        scored.append((best_variant_score, candidate["id"]))
+
+    if not scored:
+        return None
+
+    scored.sort(reverse=True)
+    best_score, best_id = scored[0]
+    second_score = scored[1][0] if len(scored) > 1 else 0.0
+    score_gap = best_score - second_score
+
+    if best_score >= 0.985:
+        return best_id
+    if city_text and best_score >= 0.86 and score_gap >= 0.03:
+        return best_id
+    if best_score >= 0.92 and score_gap >= 0.025:
+        return best_id
+    if len(scored) == 1 and best_score >= 0.86:
+        return best_id
+    return None
+
+
+def _refresh_chapter_institution_links(conn: sqlite3.Connection) -> int:
+    chapters_info = conn.execute("PRAGMA table_info(chapters)").fetchall()
+    if not chapters_info:
+        return 0
+
+    inst_rows = conn.execute(
+        "SELECT id, location_name, alias, parent_name, city, state FROM institutions"
+    ).fetchall()
+    if not inst_rows:
+        return 0
+    match_index = _build_institution_match_index(inst_rows)
+    chapter_rows = conn.execute("SELECT id, school, city, state, institution_id FROM chapters").fetchall()
+    updates = []
+    for row in chapter_rows:
+        inst_id = _match_chapter_to_institution(row["school"], row["state"], row["city"], match_index)
+        current_inst = int(row["institution_id"]) if row["institution_id"] is not None else None
+        if inst_id and current_inst != inst_id:
+            updates.append((inst_id, int(row["id"])))
+
+    if updates:
+        conn.executemany("UPDATE chapters SET institution_id=? WHERE id=?", updates)
+    return len(updates)
+
 def ensure_institutions_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -982,6 +1263,7 @@ def ensure_institutions_table(conn: sqlite3.Connection) -> None:
     prev_ef = conn.execute("SELECT value FROM app_meta WHERE key='institutions_ipeds_ef2024a_mtime'").fetchone()
     prev_ic = conn.execute("SELECT value FROM app_meta WHERE key='institutions_ipeds_ic2024_mtime'").fetchone()
     prev_drv = conn.execute("SELECT value FROM app_meta WHERE key='institutions_ipeds_drvadm2024_mtime'").fetchone()
+    prev_link_max = conn.execute("SELECT value FROM app_meta WHERE key='chapters_link_max_id'").fetchone()
     source_tag = "ipeds_2024_combined_v4"
     prev_source = conn.execute("SELECT value FROM app_meta WHERE key='institutions_source'").fetchone()
     if prev_source and prev_acc and prev_hd and prev_ef and prev_ic and prev_drv:
@@ -993,6 +1275,30 @@ def ensure_institutions_table(conn: sqlite3.Connection) -> None:
             and (prev_ic[0] or "") == ic_mtime
             and (prev_drv[0] or "") == drv_mtime
         ):
+            chapters_info = conn.execute("PRAGMA table_info(chapters)").fetchall()
+            if chapters_info:
+                current_link_max = conn.execute("SELECT COALESCE(MAX(id), 0) FROM chapters").fetchone()[0]
+                current_link_max_text = str(int(current_link_max or 0))
+                if prev_link_max and clean_text(prev_link_max[0]) == current_link_max_text:
+                    return
+                if not prev_link_max:
+                    if int(current_link_max or 0) <= 100:
+                        _refresh_chapter_institution_links(conn)
+                    conn.execute(
+                        "INSERT INTO app_meta(key, value) VALUES('chapters_link_max_id', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (current_link_max_text,),
+                    )
+                    conn.commit()
+                    return
+                _refresh_chapter_institution_links(conn)
+                conn.execute(
+                    "INSERT INTO app_meta(key, value) VALUES('chapters_link_max_id', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (current_link_max_text,),
+                )
+                conn.commit()
+                return
             return
 
     def parse_address(raw: str) -> tuple[str, str, str, str]:
@@ -1428,26 +1734,21 @@ def ensure_institutions_table(conn: sqlite3.Connection) -> None:
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (source_tag,),
     )
+    chapter_info = conn.execute("PRAGMA table_info(chapters)").fetchall()
+    if chapter_info:
+        current_link_max = conn.execute("SELECT COALESCE(MAX(id), 0) FROM chapters").fetchone()[0]
+        conn.execute(
+            "INSERT INTO app_meta(key, value) VALUES('chapters_link_max_id', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(int(current_link_max or 0)),),
+        )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_name ON institutions(location_name)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_state ON institutions(state)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_students ON institutions(students_total)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_control ON institutions(control)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_inst_unitid ON institutions(unitid)")
 
-    # Refresh chapter links when institution data changes.
-    chapters_info = conn.execute("PRAGMA table_info(chapters)").fetchall()
-    if chapters_info:
-        inst_rows = conn.execute("SELECT id, location_name FROM institutions").fetchall()
-        inst_lookup = {norm_org(r["location_name"]): int(r["id"]) for r in inst_rows if norm_org(r["location_name"])}
-        chapter_rows = conn.execute("SELECT id, school, institution_id FROM chapters").fetchall()
-        updates = []
-        for row in chapter_rows:
-            school_norm = norm_org(row["school"])
-            inst_id = inst_lookup.get(school_norm)
-            if inst_id and (row["institution_id"] is None or int(row["institution_id"]) != inst_id):
-                updates.append((inst_id, int(row["id"])))
-        if updates:
-            conn.executemany("UPDATE chapters SET institution_id=? WHERE id=?", updates)
+    _refresh_chapter_institution_links(conn)
 
     conn.commit()
 
@@ -1494,6 +1795,10 @@ def ensure_chapters_table(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_inst ON chapters(institution_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_org ON chapters(organization)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_uid ON chapters(chapter_uid)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_name ON chapters(chapter_name)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_school ON chapters(school)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_chapter_state_city ON chapters(state, city)")
 
     raw_exists = bool(table_columns("chapters_raw"))
     if not raw_exists:
@@ -1504,15 +1809,15 @@ def ensure_chapters_table(conn: sqlite3.Connection) -> None:
     prev_count = int(prev_count_row[0]) if prev_count_row and str(prev_count_row[0]).isdigit() else -1
     existing_count = conn.execute("SELECT COUNT(*) FROM chapters").fetchone()[0]
     if existing_count > 0 and raw_count == prev_count:
+        _refresh_chapter_institution_links(conn)
+        conn.commit()
         return
 
     ensure_institutions_table(conn)
-    inst_rows = conn.execute("SELECT id, location_name FROM institutions").fetchall()
-    inst_lookup = {}
-    for row in inst_rows:
-        name_norm = norm_org(row["location_name"])
-        if name_norm and name_norm not in inst_lookup:
-            inst_lookup[name_norm] = int(row["id"])
+    inst_match_rows = conn.execute(
+        "SELECT id, location_name, alias, parent_name, city, state FROM institutions"
+    ).fetchall()
+    match_index = _build_institution_match_index(inst_match_rows)
 
     conn.execute("DELETE FROM chapters")
     data_columns = [c for c in table_columns("chapters_raw") if c not in {"id"}]
@@ -1555,7 +1860,7 @@ def ensure_chapters_table(conn: sqlite3.Connection) -> None:
             continue
 
         chapter_uid = f"{source_file}::{row_number}" if source_file or row_number else chapter_id or chapter_name
-        inst_id = inst_lookup.get(norm_org(school)) if school else None
+        inst_id = _match_chapter_to_institution(school, state, city, match_index) if school else None
 
         batch.append(
             (
@@ -1595,6 +1900,7 @@ def ensure_chapters_table(conn: sqlite3.Connection) -> None:
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (str(raw_count),),
     )
+    _refresh_chapter_institution_links(conn)
     conn.commit()
 
 def load_vendor_lookup(conn: sqlite3.Connection) -> tuple:

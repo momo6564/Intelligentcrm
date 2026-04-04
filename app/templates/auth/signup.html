@@ -97,10 +97,16 @@
 </head>
 <body>
   <form method="post" class="card">
-    <h1 class="title">Create Manufacturer Workspace</h1>
-    <div class="subtitle">Set up your private CRM data space and start tracking chapters and vendors.</div>
+    <h1 class="title">Create Workspace</h1>
+    <div class="subtitle">Choose whether this account is for a manufacturer or a vendor / brand owner, then set up the right workspace.</div>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <div class="grid">
+      <label class="field wide">I Am Signing Up As
+        <select name="account_type" required>
+          <option value="manufacturer">Manufacturer</option>
+          <option value="brand_owner">Vendor / Brand Owner</option>
+        </select>
+      </label>
       <label class="field">Username
         <input name="username" required>
       </label>
@@ -118,8 +124,8 @@
       <label class="field wide">Security Answer
         <input name="security_answer" required>
       </label>
-      <label class="field wide">Manufacturer Name
-        <input name="manufacturer_name" required>
+      <label class="field wide">Manufacturer or Brand Owner Name
+        <input name="account_name" required>
       </label>
       <label class="field wide">Contact Email
         <input name="contact_email" type="email">

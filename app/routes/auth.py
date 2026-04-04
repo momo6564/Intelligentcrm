@@ -14,6 +14,19 @@ from ..utils.text_utils import clean_text
 
 bp = Blueprint('auth', __name__)
 
+
+def _default_dashboard_path(account_type: str) -> str:
+    return "/brand/dashboard" if clean_text(account_type).lower() == "brand_owner" else "/dashboard"
+
+
+def _pending_google_onboarding() -> dict:
+    raw = session.get("google_onboarding")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _clear_google_onboarding() -> None:
+    session.pop("google_onboarding", None)
+
 def _table_has_column(conn, table_name: str, col_name: str) -> bool:
     cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
     return col_name in cols
@@ -113,7 +126,7 @@ def login_page():
         ensure_crm_tables(conn)
         ensure_default_users(conn)
         row = conn.execute(
-            "SELECT id, username, password_hash, account_name, workspace_id, manufacturer_id FROM users WHERE lower(username)=lower(?)",
+            "SELECT id, username, password_hash, account_name, workspace_id, manufacturer_id, brand_owner_id, account_type FROM users WHERE lower(username)=lower(?)",
             (username,),
         ).fetchone()
         if not row or not check_password_hash(clean_text(row["password_hash"]), password):
@@ -139,7 +152,7 @@ def login_page():
                 conn.commit()
             session["user_id"] = user_id
             if (next_path or "/") == "/":
-                return redirect(url_for("main.dashboard_page"))
+                return redirect(_default_dashboard_path(clean_text(row["account_type"])))
             return redirect(next_path)
     google_enabled = bool(getattr(current_app, "google_oauth", None))
     return render_template("auth/login.html", error=error, next_path=next_path, google_enabled=google_enabled)
@@ -151,12 +164,15 @@ def signup_page():
     if request.method == "POST":
         username = clean_text(request.form.get("username"))
         password = clean_text(request.form.get("password"))
-        manufacturer_name = clean_text(request.form.get("manufacturer_name"))
+        account_type = clean_text(request.form.get("account_type")).lower() or "manufacturer"
+        account_name = clean_text(request.form.get("account_name") or request.form.get("manufacturer_name"))
         contact_email = clean_text(request.form.get("contact_email"))
         security_question = clean_text(request.form.get("security_question"))
         security_answer = clean_text(request.form.get("security_answer"))
-        if not username or not password or not manufacturer_name or not security_question or not security_answer:
-            error = "username, password, manufacturer name, security question and answer are required."
+        if account_type not in {"manufacturer", "brand_owner"}:
+            error = "Choose whether this account is a manufacturer or a vendor / brand owner."
+        elif not username or not password or not account_name or not security_question or not security_answer:
+            error = "username, password, account name, security question and answer are required."
         elif security_question not in Config.SECURITY_QUESTIONS:
             error = "Invalid security question selection."
         else:
@@ -167,29 +183,51 @@ def signup_page():
             if exists:
                 error = "username already exists."
             else:
-                row = conn.execute("SELECT id FROM manufacturers WHERE lower(name)=lower(?)", (manufacturer_name,)).fetchone()
-                if row is None:
-                    cur = conn.execute(
-                        "INSERT INTO manufacturers(name, contact_email) VALUES(?, ?)",
-                        (manufacturer_name, contact_email),
-                    )
-                    manufacturer_id = int(cur.lastrowid)
+                manufacturer_id = None
+                brand_owner_id = None
+                if account_type == "manufacturer":
+                    row = conn.execute("SELECT id FROM manufacturers WHERE lower(name)=lower(?)", (account_name,)).fetchone()
+                    if row is None:
+                        cur = conn.execute(
+                            "INSERT INTO manufacturers(name, contact_email) VALUES(?, ?)",
+                            (account_name, contact_email),
+                        )
+                        manufacturer_id = int(cur.lastrowid)
+                    else:
+                        manufacturer_id = int(row["id"])
                 else:
-                    manufacturer_id = int(row["id"])
-                workspace_id = str(uuid.uuid4())
+                    row = conn.execute("SELECT id, workspace_id FROM brand_owners WHERE lower(name)=lower(?)", (account_name,)).fetchone()
+                    if row is None:
+                        workspace_id = str(uuid.uuid4())
+                        cur = conn.execute(
+                            "INSERT INTO brand_owners(name, contact_email, workspace_id) VALUES(?, ?, ?)",
+                            (account_name, contact_email, workspace_id),
+                        )
+                        brand_owner_id = int(cur.lastrowid)
+                    else:
+                        brand_owner_id = int(row["id"])
+                        workspace_id = clean_text(row["workspace_id"]) or str(uuid.uuid4())
+                if account_type == "manufacturer":
+                    workspace_id = str(uuid.uuid4())
                 
                 users_columns = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
                 cols = ["username", "password_hash", "account_name"]
-                vals = [username, generate_password_hash(password), manufacturer_name]
+                vals = [username, generate_password_hash(password), account_name]
                 if "role" in users_columns:
                     cols.append("role")
-                    vals.append("builder")
+                    vals.append("brand_owner_admin" if account_type == "brand_owner" else "builder")
                 if "manufacturer_id" in users_columns:
                     cols.append("manufacturer_id")
                     vals.append(manufacturer_id)
+                if "brand_owner_id" in users_columns:
+                    cols.append("brand_owner_id")
+                    vals.append(brand_owner_id)
                 if "workspace_id" in users_columns:
                     cols.append("workspace_id")
                     vals.append(workspace_id)
+                if "account_type" in users_columns:
+                    cols.append("account_type")
+                    vals.append(account_type)
                 if "security_question" in users_columns:
                     cols.append("security_question")
                     vals.append(security_question)
@@ -206,13 +244,13 @@ def signup_page():
                     "signup_completed",
                     "workspace",
                     workspace_id,
-                    f"Manufacturer workspace created for {manufacturer_name}",
+                    f"{account_type.replace('_', ' ').title()} workspace created for {account_name}",
                     workspace_id=workspace_id,
-                    manufacturer_id=manufacturer_id,
+                    manufacturer_id=manufacturer_id or 0,
                 )
                 conn.commit()
                 session["user_id"] = user_id
-                return redirect(url_for("main.dashboard_page"))
+                return redirect(_default_dashboard_path(account_type))
     google_enabled = bool(getattr(current_app, "google_oauth", None))
     return render_template("auth/signup.html", error=error, questions=Config.SECURITY_QUESTIONS, google_enabled=google_enabled)
 
@@ -285,61 +323,7 @@ def google_callback():
         user = conn.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (email,)).fetchone()
 
     users_columns = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
-    if user is None:
-        manufacturer_name = full_name or (email.split("@")[0] if email else "Google User")
-        manufacturer_id = None
-        if "manufacturer_id" in users_columns:
-            row = conn.execute("SELECT id FROM manufacturers WHERE lower(name)=lower(?)", (manufacturer_name,)).fetchone()
-            if row is None:
-                cur = conn.execute(
-                    "INSERT INTO manufacturers(name, contact_email) VALUES(?, ?)",
-                    (manufacturer_name, email),
-                )
-                manufacturer_id = int(cur.lastrowid)
-            else:
-                manufacturer_id = int(row["id"])
-        workspace_id = derive_workspace_id(manufacturer_name, email, 0)
-        username_seed = (email.split("@")[0] if email else "google_user").lower()
-        username = username_seed
-        suffix = 1
-        while conn.execute("SELECT 1 FROM users WHERE lower(username)=lower(?)", (username,)).fetchone():
-            suffix += 1
-            username = f"{username_seed}{suffix}"
-
-        cols = ["username", "password_hash", "account_name"]
-        vals = [username, generate_password_hash(uuid.uuid4().hex), manufacturer_name]
-        if "role" in users_columns:
-            cols.append("role")
-            vals.append("builder")
-        if "manufacturer_id" in users_columns and manufacturer_id is not None:
-            cols.append("manufacturer_id")
-            vals.append(manufacturer_id)
-        if "workspace_id" in users_columns:
-            cols.append("workspace_id")
-            vals.append(workspace_id)
-        if "google_id" in users_columns:
-            cols.append("google_id")
-            vals.append(google_id)
-        if "email" in users_columns:
-            cols.append("email")
-            vals.append(email)
-
-        query = f"INSERT INTO users ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
-        cur_user = conn.execute(query, tuple(vals))
-        user_id = int(cur_user.lastrowid)
-        if manufacturer_id:
-            log_activity(
-                conn,
-                user_id,
-                "google_signup",
-                "workspace",
-                workspace_id,
-                f"Google sign-up for {manufacturer_name}",
-                workspace_id=workspace_id,
-                manufacturer_id=manufacturer_id,
-            )
-        conn.commit()
-    else:
+    if user is not None:
         user_id = int(user["id"])
         updates = []
         params = []
@@ -353,12 +337,153 @@ def google_callback():
             params.append(user_id)
             conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
             conn.commit()
+        account_type = clean_text(user["account_type"]) if "account_type" in user.keys() else ""
+        if account_type in {"manufacturer", "brand_owner"}:
+            session["user_id"] = int(user_id)
+            next_path = _safe_next_path(session.pop("google_next", "")) or "/"
+            _clear_google_onboarding()
+            if next_path == "/":
+                return redirect(_default_dashboard_path(account_type))
+            return redirect(next_path)
+    session["google_onboarding"] = {
+        "google_id": google_id,
+        "email": email,
+        "full_name": full_name,
+        "existing_user_id": int(user["id"]) if user is not None else 0,
+    }
+    return redirect(url_for("auth.google_onboarding_page"))
 
-    session["user_id"] = int(user_id)
-    next_path = _safe_next_path(session.pop("google_next", "")) or "/"
-    if next_path == "/":
-        return redirect(url_for("main.dashboard_page"))
-    return redirect(next_path)
+
+@bp.route("/google/onboarding", methods=["GET", "POST"])
+def google_onboarding_page():
+    pending = _pending_google_onboarding()
+    if not pending:
+        return redirect(url_for("auth.login_page"))
+    error = ""
+    if request.method == "POST":
+        account_type = clean_text(request.form.get("account_type")).lower()
+        account_name = clean_text(request.form.get("account_name"))
+        if account_type not in {"manufacturer", "brand_owner"}:
+            error = "Choose whether this Google account is for a manufacturer or a vendor / brand owner."
+        elif not account_name:
+            error = "Account name is required."
+        else:
+            conn = get_connection()
+            ensure_crm_tables(conn)
+            ensure_default_users(conn)
+            users_columns = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+            existing_user_id = int(pending.get("existing_user_id") or 0)
+            google_id = clean_text(pending.get("google_id"))
+            email = clean_text(pending.get("email")).lower()
+            manufacturer_id = None
+            brand_owner_id = None
+            if account_type == "manufacturer":
+                row = conn.execute("SELECT id FROM manufacturers WHERE lower(name)=lower(?)", (account_name,)).fetchone()
+                if row is None:
+                    cur = conn.execute(
+                        "INSERT INTO manufacturers(name, contact_email) VALUES(?, ?)",
+                        (account_name, email),
+                    )
+                    manufacturer_id = int(cur.lastrowid)
+                else:
+                    manufacturer_id = int(row["id"])
+                workspace_id = derive_workspace_id(account_name, email, existing_user_id)
+                role_value = "builder"
+            else:
+                row = conn.execute("SELECT id, workspace_id FROM brand_owners WHERE lower(name)=lower(?)", (account_name,)).fetchone()
+                if row is None:
+                    workspace_id = derive_workspace_id(account_name, email, existing_user_id)
+                    cur = conn.execute(
+                        "INSERT INTO brand_owners(name, contact_email, workspace_id) VALUES(?, ?, ?)",
+                        (account_name, email, workspace_id),
+                    )
+                    brand_owner_id = int(cur.lastrowid)
+                else:
+                    brand_owner_id = int(row["id"])
+                    workspace_id = clean_text(row["workspace_id"]) or derive_workspace_id(account_name, email, existing_user_id)
+                role_value = "brand_owner_admin"
+
+            if existing_user_id > 0:
+                updates = ["account_name=?", "workspace_id=?"]
+                params = [account_name, workspace_id]
+                if "account_type" in users_columns:
+                    updates.append("account_type=?")
+                    params.append(account_type)
+                if "role" in users_columns:
+                    updates.append("role=?")
+                    params.append(role_value)
+                if "manufacturer_id" in users_columns:
+                    updates.append("manufacturer_id=?")
+                    params.append(manufacturer_id)
+                if "brand_owner_id" in users_columns:
+                    updates.append("brand_owner_id=?")
+                    params.append(brand_owner_id)
+                if "google_id" in users_columns and google_id:
+                    updates.append("google_id=?")
+                    params.append(google_id)
+                if "email" in users_columns and email:
+                    updates.append("email=?")
+                    params.append(email)
+                params.append(existing_user_id)
+                conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
+                user_id = existing_user_id
+            else:
+                username_seed = (email.split("@")[0] if email else "google_user").lower() or "google_user"
+                username = username_seed
+                suffix = 1
+                while conn.execute("SELECT 1 FROM users WHERE lower(username)=lower(?)", (username,)).fetchone():
+                    suffix += 1
+                    username = f"{username_seed}{suffix}"
+                cols = ["username", "password_hash", "account_name"]
+                vals = [username, generate_password_hash(uuid.uuid4().hex), account_name]
+                if "account_type" in users_columns:
+                    cols.append("account_type")
+                    vals.append(account_type)
+                if "role" in users_columns:
+                    cols.append("role")
+                    vals.append(role_value)
+                if "manufacturer_id" in users_columns:
+                    cols.append("manufacturer_id")
+                    vals.append(manufacturer_id)
+                if "brand_owner_id" in users_columns:
+                    cols.append("brand_owner_id")
+                    vals.append(brand_owner_id)
+                if "workspace_id" in users_columns:
+                    cols.append("workspace_id")
+                    vals.append(workspace_id)
+                if "google_id" in users_columns:
+                    cols.append("google_id")
+                    vals.append(google_id)
+                if "email" in users_columns:
+                    cols.append("email")
+                    vals.append(email)
+                query = f"INSERT INTO users ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
+                cur_user = conn.execute(query, tuple(vals))
+                user_id = int(cur_user.lastrowid)
+
+            log_activity(
+                conn,
+                int(user_id),
+                "google_signup_completed",
+                "workspace",
+                workspace_id,
+                f"Google onboarding completed for {account_name}",
+                workspace_id=workspace_id,
+                manufacturer_id=manufacturer_id or 0,
+            )
+            conn.commit()
+            session["user_id"] = int(user_id)
+            next_path = _safe_next_path(session.pop("google_next", "")) or "/"
+            _clear_google_onboarding()
+            if next_path == "/":
+                return redirect(_default_dashboard_path(account_type))
+            return redirect(next_path)
+    return render_template(
+        "auth/google_onboarding.html",
+        error=error,
+        pending_name=clean_text(pending.get("full_name")) or clean_text(pending.get("email")).split("@")[0],
+        pending_email=clean_text(pending.get("email")),
+    )
 
 
 @bp.route("/reset-password", methods=["GET", "POST"])

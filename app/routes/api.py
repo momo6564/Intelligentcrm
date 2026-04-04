@@ -14,6 +14,14 @@ from ..services.dashboard import manufacturer_dashboard_snapshot, manufacturer_d
 from ..services.chapters import fetch_normalized_rows, get_chapter_by_id
 from ..services.institutions import fetch_institution_profile
 from ..services.vendors import vendor_competitors, build_vendor_hot_leads
+from ..research_memory import (
+    MAX_RESEARCH_PROMPTS,
+    normalize_research_category,
+    research_placeholder_hints,
+    research_prompt_slots_for_user,
+    reset_research_prompt_slots,
+    save_research_prompt_slots,
+)
 from ..utils.text_utils import clean_text, clean_date, norm_state
 from ..utils.email import send_email_best_effort
 from ..utils.workspace import workspace_id_for_user
@@ -2157,6 +2165,55 @@ def api_m_research():
     conn.commit()
     return jsonify({"ok": True, "summary": f"Research links generated for {name}", "links": links})
 
+
+@bp.route("/api/research-prompts", methods=["GET", "POST"])
+@login_required()
+def api_research_prompts():
+    user = get_session_user()
+    workspace_id = workspace_id_for_user(user)
+    conn = get_connection()
+    ensure_crm_tables(conn)
+
+    if request.method == "GET":
+        category = normalize_research_category(request.args.get("category"))
+        if not category:
+            return jsonify({"ok": False, "error": "Valid category is required"}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "category": category,
+                "max_prompts": MAX_RESEARCH_PROMPTS,
+                "placeholders": research_placeholder_hints(category),
+                "prompts": research_prompt_slots_for_user(conn, user, category),
+            }
+        )
+
+    payload = request.get_json(silent=True) or {}
+    category = normalize_research_category(payload.get("category"))
+    if not category:
+        return jsonify({"ok": False, "error": "Valid category is required"}), 400
+    if payload.get("reset_defaults"):
+        prompts = reset_research_prompt_slots(conn, user, category)
+        return jsonify({"ok": True, "category": category, "prompts": prompts})
+    prompts_raw = payload.get("prompts")
+    if not isinstance(prompts_raw, list):
+        return jsonify({"ok": False, "error": "prompts must be a list"}), 400
+    try:
+        prompts = save_research_prompt_slots(conn, user, category, prompts_raw, workspace_id=workspace_id)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    log_activity(
+        conn,
+        int(user.get("id") or 0),
+        "saved_research_prompts",
+        "research_prompt",
+        category,
+        f"Saved {len([p for p in prompts if clean_text(p.get('prompt_text'))])} prompt slots",
+        workspace_id=workspace_id,
+    )
+    conn.commit()
+    return jsonify({"ok": True, "category": category, "prompts": prompts})
+
 @bp.route("/agent/research", methods=["POST"])
 @login_required()
 def api_alias_agent_research():
@@ -2316,43 +2373,6 @@ def api_chapters():
             tuple(params),
         ).fetchone()[0]
 
-        crm_rows = conn.execute(
-            """
-            SELECT id, chapter_id, status, follow_up_date, priority, updated_at
-            FROM crm_contacts
-            WHERE type='chapter' AND workspace_id=?
-            ORDER BY id DESC
-            """,
-            (workspace_id,),
-        ).fetchall()
-        crm_map = {}
-        for r in crm_rows:
-            cid = clean_text(r["chapter_id"])
-            if not cid or cid in crm_map:
-                continue
-            crm_map[cid] = {
-                "crm_contact_id": int(r["id"]),
-                "crm_stage": normalize_crm_status(r["status"]),
-                "follow_up_date": clean_text(r["follow_up_date"]),
-                "priority": clean_text(r["priority"]) or "normal",
-                "updated_at": clean_text(r["updated_at"]),
-            }
-        task_rows = conn.execute(
-            """
-            SELECT crm_contact_id, COUNT(*) AS c
-            FROM crm_tasks
-            WHERE workspace_id=? AND lower(coalesce(status,''))='open'
-            GROUP BY crm_contact_id
-            """,
-            (workspace_id,),
-        ).fetchall()
-        task_map = {int(r["crm_contact_id"]): int(r["c"]) for r in task_rows}
-        served_rows = conn.execute(
-            "SELECT DISTINCT chapter_id FROM vendor_orders WHERE workspace_id=?",
-            (workspace_id,),
-        ).fetchall()
-        served_set = {clean_text(r["chapter_id"]) for r in served_rows if clean_text(r["chapter_id"])}
-
         rows = conn.execute(
             f"""
             SELECT chapter_uid, chapter_name, organization, school, city, state, status, founded_year,
@@ -2364,6 +2384,52 @@ def api_chapters():
             """,
             tuple(params + [limit, offset]),
         ).fetchall()
+        chapter_ids = [clean_text(r["chapter_uid"]) for r in rows if clean_text(r["chapter_uid"])]
+        crm_map = {}
+        task_map = {}
+        served_set = set()
+        if chapter_ids:
+            placeholders = ",".join("?" for _ in chapter_ids)
+            crm_rows = conn.execute(
+                f"""
+                SELECT id, chapter_id, status, follow_up_date, priority, updated_at
+                FROM crm_contacts
+                WHERE type='chapter' AND workspace_id=? AND chapter_id IN ({placeholders})
+                ORDER BY id DESC
+                """,
+                (workspace_id, *chapter_ids),
+            ).fetchall()
+            contact_ids = []
+            for r in crm_rows:
+                cid = clean_text(r["chapter_id"])
+                if not cid or cid in crm_map:
+                    continue
+                contact_id = int(r["id"])
+                contact_ids.append(contact_id)
+                crm_map[cid] = {
+                    "crm_contact_id": contact_id,
+                    "crm_stage": normalize_crm_status(r["status"]),
+                    "follow_up_date": clean_text(r["follow_up_date"]),
+                    "priority": clean_text(r["priority"]) or "normal",
+                    "updated_at": clean_text(r["updated_at"]),
+                }
+            if contact_ids:
+                task_placeholders = ",".join("?" for _ in contact_ids)
+                task_rows = conn.execute(
+                    f"""
+                    SELECT crm_contact_id, COUNT(*) AS c
+                    FROM crm_tasks
+                    WHERE workspace_id=? AND lower(coalesce(status,''))='open' AND crm_contact_id IN ({task_placeholders})
+                    GROUP BY crm_contact_id
+                    """,
+                    (workspace_id, *contact_ids),
+                ).fetchall()
+                task_map = {int(r["crm_contact_id"]): int(r["c"]) for r in task_rows}
+            served_rows = conn.execute(
+                f"SELECT DISTINCT chapter_id FROM vendor_orders WHERE workspace_id=? AND chapter_id IN ({placeholders})",
+                (workspace_id, *chapter_ids),
+            ).fetchall()
+            served_set = {clean_text(r["chapter_id"]) for r in served_rows if clean_text(r["chapter_id"])}
         out = []
         for r in rows:
             chapter_id = clean_text(r["chapter_uid"])
