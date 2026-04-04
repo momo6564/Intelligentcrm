@@ -1,7 +1,7 @@
 import os
 from datetime import date
 from urllib.parse import quote, quote_plus
-from flask import Blueprint, current_app, render_template, redirect, url_for
+from flask import Blueprint, current_app, render_template, redirect, url_for, jsonify
 from ..auth import account_type_for_user, is_brand_owner_user, login_required, get_session_user
 from ..config import Config
 from ..database import get_connection, ensure_chapters_table, ensure_crm_tables, ensure_institutions_table, ensure_vendor_table
@@ -15,6 +15,255 @@ DASHBOARD_LIST_LIMIT = 24
 def render_app(template_name: str, **context):
     context.setdefault("me", get_session_user())
     return render_template(template_name, **context)
+
+
+def _served_school_rows(conn, workspace_id: str) -> list[dict]:
+    chapter_contact_rows = conn.execute(
+        """
+        SELECT c.chapter_id, c.name, c.connection, c.created_at, ch.school, ch.city, ch.state
+        FROM crm_contacts c
+        LEFT JOIN chapters ch ON ch.chapter_uid=c.chapter_id
+        WHERE c.workspace_id=?
+          AND lower(coalesce(c.type,''))='chapter'
+          AND lower(coalesce(c.status,''))='closed'
+        ORDER BY c.created_at DESC, c.id DESC
+        """,
+        (workspace_id,),
+    ).fetchall()
+    order_rows = conn.execute(
+        """
+        SELECT chapter_id, chapter_name, org, school, city, state, vendor, created_at
+        FROM vendor_orders
+        WHERE workspace_id=?
+        ORDER BY created_at DESC, id DESC
+        """,
+        (workspace_id,),
+    ).fetchall()
+
+    chapter_map = {}
+    for row in chapter_contact_rows:
+        chapter_id = clean_text(row["chapter_id"])
+        name = clean_text(row["name"])
+        key = chapter_id or f"name::{name.lower()}"
+        if not key:
+            continue
+        chapter_map.setdefault(
+            key,
+            {
+                "chapter_id": chapter_id,
+                "name": name,
+                "org": clean_text(row["connection"]),
+                "school": clean_text(row["school"]),
+                "city": clean_text(row["city"]),
+                "state": clean_text(row["state"]),
+                "added_at": clean_text(row["created_at"]),
+            },
+        )
+    for row in order_rows:
+        chapter_id = clean_text(row["chapter_id"])
+        name = clean_text(row["chapter_name"])
+        key = chapter_id or f"name::{name.lower()}"
+        if not key:
+            continue
+        chapter_map.setdefault(
+            key,
+            {
+                "chapter_id": chapter_id,
+                "name": name,
+                "org": clean_text(row["org"]),
+                "school": clean_text(row["school"]),
+                "city": clean_text(row["city"]),
+                "state": clean_text(row["state"]),
+                "added_at": clean_text(row["created_at"]),
+            },
+        )
+
+    chapters_served = [
+        {
+            **rec,
+            "location": ", ".join(part for part in [clean_text(rec.get("city")), clean_text(rec.get("state"))] if part),
+            "encodedId": quote(clean_text(rec.get("chapter_id")), safe="") if clean_text(rec.get("chapter_id")) else "",
+        }
+        for rec in chapter_map.values()
+    ]
+    school_map = {}
+    for row in chapters_served:
+        school = clean_text(row.get("school"))
+        if not school:
+            continue
+        bucket = school_map.setdefault(
+            school,
+            {"school": school, "chapters_count": 0, "orgs": set(), "states": set()},
+        )
+        bucket["chapters_count"] += 1
+        org = clean_text(row.get("org"))
+        if org:
+            bucket["orgs"].add(org)
+        state = clean_text(row.get("state"))
+        if state:
+            bucket["states"].add(state)
+    return sorted(
+        [
+            {
+                "school": item["school"],
+                "chapters_count": int(item["chapters_count"]),
+                "org_count": len(item["orgs"]),
+                "states": ", ".join(sorted(item["states"])),
+            }
+            for item in school_map.values()
+        ],
+        key=lambda r: (-int(r.get("chapters_count") or 0), r.get("school", "")),
+    )
+
+
+def _served_map_payload(conn, workspace_id: str) -> dict:
+    ws = clean_text(workspace_id)
+    if not ws:
+        return {
+            "points": [],
+            "stats": {
+                "mapped": 0,
+                "chapter_linked": 0,
+                "institution_served": 0,
+                "chapter_only": 0,
+                "institution_only": 0,
+                "both": 0,
+            },
+        }
+
+    ensure_crm_tables(conn)
+    ensure_chapters_table(conn)
+    ensure_institutions_table(conn)
+
+    schools_served = _served_school_rows(conn, ws)
+    served_school_names = {
+        clean_text(row.get("school"))
+        for row in schools_served
+        if clean_text(row.get("school"))
+    }
+    served_institution_rows = conn.execute(
+        """
+        SELECT name, connection
+        FROM crm_contacts
+        WHERE workspace_id=?
+          AND type IN ('school', 'other')
+          AND lower(coalesce(status, ''))='closed'
+        ORDER BY id DESC
+        """,
+        (ws,),
+    ).fetchall()
+    institution_ids: set[str] = set()
+    institution_names = {name.lower() for name in served_school_names}
+    for row in served_institution_rows:
+        connection = clean_text(row["connection"])
+        if connection.startswith("institution:"):
+            institution_ids.add(connection.split(":", 1)[1])
+        name = clean_text(row["name"]).lower()
+        if name:
+            institution_names.add(name)
+
+    institution_rows = []
+    where_clauses = []
+    params: list[str] = []
+    if institution_ids:
+        where_clauses.append(f"id IN ({','.join('?' for _ in institution_ids)})")
+        params.extend(sorted(institution_ids))
+    if institution_names:
+        where_clauses.append(f"lower(location_name) IN ({','.join('?' for _ in institution_names)})")
+        params.extend(sorted(institution_names))
+    if where_clauses:
+        institution_rows = conn.execute(
+            f"""
+            SELECT id, location_name, city, state, latitude, longitude, control, institution_level
+            FROM institutions
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+              AND trim(coalesce(latitude, '')) <> ''
+              AND trim(coalesce(longitude, '')) <> ''
+              AND ({' OR '.join(where_clauses)})
+            """,
+            tuple(params),
+        ).fetchall()
+
+    institution_by_id = {}
+    institution_by_name = {}
+    for row in institution_rows:
+        item = {k: row[k] for k in row.keys()}
+        try:
+            item["latitude"] = float(item["latitude"])
+            item["longitude"] = float(item["longitude"])
+        except (TypeError, ValueError):
+            continue
+        institution_by_id[str(item["id"])] = item
+        lookup_key = clean_text(item.get("location_name")).lower()
+        if lookup_key and lookup_key not in institution_by_name:
+            institution_by_name[lookup_key] = item
+
+    served_map_points = {}
+
+    def upsert_map_point(inst: dict, *, school_row=None, institution_contact=False):
+        key = str(inst.get("id"))
+        point = served_map_points.setdefault(
+            key,
+            {
+                "institution_id": int(inst["id"]),
+                "institution_name": clean_text(inst.get("location_name")),
+                "city": clean_text(inst.get("city")),
+                "state": clean_text(inst.get("state")),
+                "latitude": float(inst["latitude"]),
+                "longitude": float(inst["longitude"]),
+                "control": clean_text(inst.get("control")),
+                "institution_level": clean_text(inst.get("institution_level")),
+                "chapter_count": 0,
+                "org_count": 0,
+                "has_chapter_service": False,
+                "has_institution_service": False,
+            },
+        )
+        if school_row:
+            point["has_chapter_service"] = True
+            point["chapter_count"] = max(int(point["chapter_count"]), int(school_row.get("chapters_count") or 0))
+            point["org_count"] = max(int(point["org_count"]), int(school_row.get("org_count") or 0))
+        if institution_contact:
+            point["has_institution_service"] = True
+
+    for row in schools_served:
+        school_key = clean_text(row.get("school")).lower()
+        inst = institution_by_name.get(school_key)
+        if inst:
+            upsert_map_point(inst, school_row=row)
+
+    for row in served_institution_rows:
+        connection = clean_text(row["connection"])
+        inst = None
+        if connection.startswith("institution:"):
+            inst = institution_by_id.get(connection.split(":", 1)[1])
+        if not inst:
+            inst = institution_by_name.get(clean_text(row["name"]).lower())
+        if inst:
+            upsert_map_point(inst, institution_contact=True)
+
+    points = sorted(
+        served_map_points.values(),
+        key=lambda item: (
+            -int(item.get("has_institution_service") or 0),
+            -int(item.get("chapter_count") or 0),
+            item.get("institution_name", ""),
+        ),
+    )
+    both = sum(1 for point in points if point.get("has_chapter_service") and point.get("has_institution_service"))
+    chapter_only = sum(1 for point in points if point.get("has_chapter_service") and not point.get("has_institution_service"))
+    institution_only = sum(1 for point in points if point.get("has_institution_service") and not point.get("has_chapter_service"))
+    return {
+        "points": points,
+        "stats": {
+            "mapped": len(points),
+            "chapter_linked": chapter_only + both,
+            "institution_served": institution_only + both,
+            "chapter_only": chapter_only,
+            "institution_only": institution_only,
+            "both": both,
+        },
+    }
 
 
 def _landing_asset_name(extension: str) -> str:
@@ -131,7 +380,6 @@ def dashboard_page():
     conn = get_connection()
     ensure_crm_tables(conn)
     ensure_chapters_table(conn)
-    ensure_institutions_table(conn)
     ensure_vendor_table(conn)
     chapter_contact_rows = conn.execute(
         """
@@ -425,121 +673,6 @@ def dashboard_page():
         "vendors_served": total_vendors_served,
     }
 
-    served_school_names = {
-        clean_text(row.get("school"))
-        for row in schools_served
-        if clean_text(row.get("school"))
-    }
-    served_institution_rows = conn.execute(
-        """
-        SELECT name, connection
-        FROM crm_contacts
-        WHERE workspace_id=?
-          AND type IN ('school', 'other')
-          AND lower(coalesce(status, ''))='closed'
-        ORDER BY id DESC
-        """,
-        (workspace_id,),
-    ).fetchall()
-    institution_ids: set[str] = set()
-    institution_names = {name.lower() for name in served_school_names}
-    for row in served_institution_rows:
-        connection = clean_text(row["connection"])
-        if connection.startswith("institution:"):
-            institution_ids.add(connection.split(":", 1)[1])
-        name = clean_text(row["name"]).lower()
-        if name:
-            institution_names.add(name)
-
-    institution_rows = []
-    where_clauses = []
-    params: list[str] = []
-    if institution_ids:
-        where_clauses.append(f"id IN ({','.join('?' for _ in institution_ids)})")
-        params.extend(sorted(institution_ids))
-    if institution_names:
-        where_clauses.append(f"lower(location_name) IN ({','.join('?' for _ in institution_names)})")
-        params.extend(sorted(institution_names))
-    if where_clauses:
-        institution_rows = conn.execute(
-            f"""
-            SELECT id, location_name, city, state, latitude, longitude, control, institution_level
-            FROM institutions
-            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-              AND trim(coalesce(latitude, '')) <> ''
-              AND trim(coalesce(longitude, '')) <> ''
-              AND ({' OR '.join(where_clauses)})
-            """,
-            tuple(params),
-        ).fetchall()
-    institution_by_id = {}
-    institution_by_name = {}
-    for row in institution_rows:
-        item = {k: row[k] for k in row.keys()}
-        try:
-            item["latitude"] = float(item["latitude"])
-            item["longitude"] = float(item["longitude"])
-        except (TypeError, ValueError):
-            continue
-        institution_by_id[str(item["id"])] = item
-        lookup_key = clean_text(item.get("location_name")).lower()
-        if lookup_key and lookup_key not in institution_by_name:
-            institution_by_name[lookup_key] = item
-
-    served_map_points = {}
-
-    def upsert_map_point(inst: dict, *, school_row=None, institution_contact=False):
-        key = str(inst.get("id"))
-        point = served_map_points.setdefault(
-            key,
-            {
-                "institution_id": int(inst["id"]),
-                "institution_name": clean_text(inst.get("location_name")),
-                "city": clean_text(inst.get("city")),
-                "state": clean_text(inst.get("state")),
-                "latitude": float(inst["latitude"]),
-                "longitude": float(inst["longitude"]),
-                "control": clean_text(inst.get("control")),
-                "institution_level": clean_text(inst.get("institution_level")),
-                "chapter_count": 0,
-                "org_count": 0,
-                "has_chapter_service": False,
-                "has_institution_service": False,
-            },
-        )
-        if school_row:
-            point["has_chapter_service"] = True
-            point["chapter_count"] = max(int(point["chapter_count"]), int(school_row.get("chapters_count") or 0))
-            point["org_count"] = max(int(point["org_count"]), int(school_row.get("org_count") or 0))
-        if institution_contact:
-            point["has_institution_service"] = True
-
-    for row in schools_served:
-        school_key = clean_text(row.get("school")).lower()
-        inst = institution_by_name.get(school_key)
-        if not inst:
-            continue
-        upsert_map_point(inst, school_row=row)
-
-    for row in served_institution_rows:
-        connection = clean_text(row["connection"])
-        inst = None
-        if connection.startswith("institution:"):
-            inst = institution_by_id.get(connection.split(":", 1)[1])
-        if not inst:
-            inst = institution_by_name.get(clean_text(row["name"]).lower())
-        if not inst:
-            continue
-        upsert_map_point(inst, institution_contact=True)
-
-    served_map_points = sorted(
-        served_map_points.values(),
-        key=lambda item: (
-            -int(item.get("has_institution_service") or 0),
-            -int(item.get("chapter_count") or 0),
-            item.get("institution_name", ""),
-        ),
-    )
     return render_app(
         "dashboards/dashboard.html",
         metrics=metrics,
@@ -547,11 +680,25 @@ def dashboard_page():
         orgs_served=orgs_served[:DASHBOARD_LIST_LIMIT],
         chapters_served=chapters_served[:DASHBOARD_LIST_LIMIT],
         vendors_served=vendors_served[:DASHBOARD_LIST_LIMIT],
-        served_map_points=served_map_points,
+        served_map_points=[],
+        served_map_stats={"mapped": 0, "chapter_linked": 0, "institution_served": 0, "chapter_only": 0, "institution_only": 0, "both": 0},
+        served_map_lazy=True,
         needs_follow_up=needs_follow_up,
         recent_activity=recent_activity,
         error="",
     )
+
+
+@bp.route("/api/dashboard/served-map")
+@login_required()
+def dashboard_served_map_api():
+    user = get_session_user()
+    if is_brand_owner_user(user):
+        return jsonify({"ok": False, "error": "manufacturer dashboard only"}), 403
+    workspace_id = workspace_id_for_user(user)
+    conn = get_connection()
+    payload = _served_map_payload(conn, workspace_id)
+    return jsonify({"ok": True, **payload})
 
 @bp.route("/leads")
 @login_required()

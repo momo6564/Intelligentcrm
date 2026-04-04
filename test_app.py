@@ -7,6 +7,7 @@ from app import create_app
 from app.config import Config
 from app.database import get_connection, ensure_crm_tables, ensure_institutions_table, ensure_chapters_table, ensure_vendor_table
 from app.order_ops import ensure_ops_tables
+from app.routes import main as main_routes
 from app.services.chapters import fetch_normalized_rows
 
 
@@ -96,6 +97,43 @@ class AppTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.get_data(as_text=True)
         self.assertIn('"/dashboard"', body)
+
+    def test_dashboard_page_skips_eager_institutions_bootstrap(self):
+        self._login("demo", "demo123")
+        original_ensure = main_routes.ensure_institutions_table
+
+        def fail_if_called(conn):
+            raise AssertionError("dashboard should not eagerly bootstrap institutions")
+
+        main_routes.ensure_institutions_table = fail_if_called
+        try:
+            resp = self.client.get("/dashboard")
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_data(as_text=True)
+            self.assertIn("Load Served Map", body)
+        finally:
+            main_routes.ensure_institutions_table = original_ensure
+
+    def test_dashboard_served_map_api_bootstraps_institutions_on_demand(self):
+        self._login("demo", "demo123")
+        calls = {"count": 0}
+        original_ensure = main_routes.ensure_institutions_table
+
+        def tracking_ensure(conn):
+            calls["count"] += 1
+            return original_ensure(conn)
+
+        main_routes.ensure_institutions_table = tracking_ensure
+        try:
+            resp = self.client.get("/api/dashboard/served-map")
+            self.assertEqual(resp.status_code, 200)
+            payload = resp.get_json()
+            self.assertTrue(payload.get("ok"))
+            self.assertIn("points", payload)
+            self.assertIn("stats", payload)
+            self.assertGreaterEqual(calls["count"], 1)
+        finally:
+            main_routes.ensure_institutions_table = original_ensure
 
     def test_signup_page_shows_account_type_choices(self):
         anon = self.app.test_client()
