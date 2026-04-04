@@ -1,11 +1,11 @@
 import os
 from functools import wraps
 from flask import Blueprint, render_template, request, redirect, url_for, send_from_directory
-from werkzeug.security import generate_password_hash
 
 from ..auth import get_session_user
 from ..database import get_connection, ensure_crm_tables, ensure_default_users, derive_workspace_id
 from ..config import Config
+from ..utils.passwords import hash_password
 from ..utils.text_utils import clean_text
 
 bp = Blueprint("admin", __name__)
@@ -108,7 +108,7 @@ def admin_create_user():
 
     users_columns = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
     cols = ["username", "password_hash", "account_name"]
-    vals = [username, generate_password_hash(password), account_name]
+    vals = [username, hash_password(password), account_name]
     if "role" in users_columns:
         cols.append("role")
         vals.append(role)

@@ -162,9 +162,18 @@ def api_ops_create_order():
         return _forbidden()
     workspace_id = workspace_id_for_user(user)
     payload = request.get_json(silent=True) or {}
+    brand_owner_workspace_id = clean_text(payload.get("brand_owner_workspace_id"))
     conn = get_ops_conn()
     try:
         order_id = create_order(conn, workspace_id, int(user.get("id") or 0), payload)
+        if brand_owner_workspace_id:
+            share_order_with_brand_owner(
+                conn,
+                workspace_id,
+                order_id,
+                brand_owner_workspace_id,
+                int(user.get("id") or 0),
+            )
         conn.commit()
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

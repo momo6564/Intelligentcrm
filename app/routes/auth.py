@@ -1,6 +1,6 @@
 from flask import Blueprint, request, session, redirect, url_for, render_template, current_app
-from werkzeug.security import check_password_hash, generate_password_hash
 import uuid
+import re
 from urllib.parse import urlsplit
 
 try:
@@ -10,6 +10,7 @@ except Exception:  # pragma: no cover - Authlib optional in some environments
 
 from ..database import get_connection, ensure_crm_tables, ensure_default_users, log_activity, derive_workspace_id
 from ..config import Config
+from ..utils.passwords import hash_password, password_hash_needs_refresh, verify_password
 from ..utils.text_utils import clean_text
 
 bp = Blueprint('auth', __name__)
@@ -108,6 +109,26 @@ def _safe_next_path(raw: str) -> str:
         return "/"
     return path
 
+
+def _build_full_name(first_name: str, last_name: str) -> str:
+    return " ".join(part for part in [clean_text(first_name), clean_text(last_name)] if part).strip()
+
+
+def _username_seed_from_identity(email: str, fallback: str) -> str:
+    source = clean_text(email).split("@")[0] if clean_text(email) else clean_text(fallback)
+    slug = re.sub(r"[^a-z0-9]+", "", source.lower())
+    return slug or "user"
+
+
+def _unique_username(conn, email: str = "", fallback: str = "") -> str:
+    seed = _username_seed_from_identity(email, fallback)
+    username = seed
+    suffix = 1
+    while conn.execute("SELECT 1 FROM users WHERE lower(username)=lower(?)", (username,)).fetchone():
+        suffix += 1
+        username = f"{seed}{suffix}"
+    return username
+
 @bp.route("/login", methods=["GET", "POST"])
 def login_page():
     error = clean_text(request.args.get("error"))
@@ -119,20 +140,28 @@ def login_page():
         error = "Google sign-in failed. Please try again."
     next_path = _safe_next_path(request.args.get("next"))
     if request.method == "POST":
-        username = clean_text(request.form.get("username"))
+        login_value = clean_text(request.form.get("login") or request.form.get("username") or request.form.get("email")).lower()
         password = clean_text(request.form.get("password"))
         next_path = _safe_next_path(request.form.get("next"))
         conn = get_connection()
         ensure_crm_tables(conn)
         ensure_default_users(conn)
         row = conn.execute(
-            "SELECT id, username, password_hash, account_name, workspace_id, manufacturer_id, brand_owner_id, account_type FROM users WHERE lower(username)=lower(?)",
-            (username,),
+            """
+            SELECT id, username, email, password_hash, account_name, workspace_id, manufacturer_id, brand_owner_id, account_type
+            FROM users
+            WHERE lower(username)=lower(?) OR lower(coalesce(email,''))=lower(?)
+            LIMIT 1
+            """,
+            (login_value, login_value),
         ).fetchone()
-        if not row or not check_password_hash(clean_text(row["password_hash"]), password):
-            error = "Invalid username or password."
+        if not row or not verify_password(clean_text(row["password_hash"]), password):
+            error = "Invalid email or password."
         else:
             user_id = int(row["id"])
+            if password_hash_needs_refresh(clean_text(row["password_hash"])):
+                conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), user_id))
+                conn.commit()
             workspace_id = clean_text(row["workspace_id"])
             manufacturer_id = int(row["manufacturer_id"] or 0)
             if workspace_id and not _workspace_has_any_data(conn, workspace_id):
@@ -162,46 +191,68 @@ def login_page():
 def signup_page():
     error = ""
     if request.method == "POST":
-        username = clean_text(request.form.get("username"))
+        legacy_username = clean_text(request.form.get("username"))
+        first_name = clean_text(request.form.get("first_name"))
+        last_name = clean_text(request.form.get("last_name"))
+        if legacy_username:
+            first_name = first_name or legacy_username
+            last_name = last_name or "User"
         password = clean_text(request.form.get("password"))
         account_type = clean_text(request.form.get("account_type")).lower() or "manufacturer"
-        account_name = clean_text(request.form.get("account_name") or request.form.get("manufacturer_name"))
-        contact_email = clean_text(request.form.get("contact_email"))
+        account_name = clean_text(request.form.get("company") or request.form.get("account_name") or request.form.get("manufacturer_name"))
+        contact_email = clean_text(request.form.get("email") or request.form.get("contact_email")).lower()
+        full_name = _build_full_name(first_name, last_name)
+        agreed_terms = clean_text(request.form.get("agree_terms")).lower() in {"1", "true", "on", "yes"}
         security_question = clean_text(request.form.get("security_question"))
         security_answer = clean_text(request.form.get("security_answer"))
         if account_type not in {"manufacturer", "brand_owner"}:
             error = "Choose whether this account is a manufacturer or a vendor / brand owner."
-        elif not username or not password or not account_name or not security_question or not security_answer:
-            error = "username, password, account name, security question and answer are required."
-        elif security_question not in Config.SECURITY_QUESTIONS:
+        elif not first_name or not last_name or not contact_email or not password:
+            error = "First name, last name, email, and password are required."
+        elif not agreed_terms:
+            error = "Please agree to the Terms of Service and Privacy Policy."
+        elif security_question and security_question not in Config.SECURITY_QUESTIONS:
             error = "Invalid security question selection."
         else:
             conn = get_connection()
             ensure_crm_tables(conn)
             ensure_default_users(conn)
-            exists = conn.execute("SELECT id FROM users WHERE lower(username)=lower(?)", (username,)).fetchone()
-            if exists:
+            email_exists = conn.execute(
+                "SELECT id FROM users WHERE lower(coalesce(email,''))=lower(?)",
+                (contact_email,),
+            ).fetchone()
+            username_exists = None
+            if legacy_username:
+                username_exists = conn.execute(
+                    "SELECT id FROM users WHERE lower(username)=lower(?)",
+                    (legacy_username,),
+                ).fetchone()
+            if email_exists:
+                error = "email already exists."
+            elif username_exists:
                 error = "username already exists."
             else:
+                username = legacy_username or _unique_username(conn, contact_email, full_name or account_name)
                 manufacturer_id = None
                 brand_owner_id = None
+                workspace_title = account_name or full_name
                 if account_type == "manufacturer":
-                    row = conn.execute("SELECT id FROM manufacturers WHERE lower(name)=lower(?)", (account_name,)).fetchone()
+                    row = conn.execute("SELECT id FROM manufacturers WHERE lower(name)=lower(?)", (workspace_title,)).fetchone()
                     if row is None:
                         cur = conn.execute(
                             "INSERT INTO manufacturers(name, contact_email) VALUES(?, ?)",
-                            (account_name, contact_email),
+                            (workspace_title, contact_email),
                         )
                         manufacturer_id = int(cur.lastrowid)
                     else:
                         manufacturer_id = int(row["id"])
                 else:
-                    row = conn.execute("SELECT id, workspace_id FROM brand_owners WHERE lower(name)=lower(?)", (account_name,)).fetchone()
+                    row = conn.execute("SELECT id, workspace_id FROM brand_owners WHERE lower(name)=lower(?)", (workspace_title,)).fetchone()
                     if row is None:
                         workspace_id = str(uuid.uuid4())
                         cur = conn.execute(
                             "INSERT INTO brand_owners(name, contact_email, workspace_id) VALUES(?, ?, ?)",
-                            (account_name, contact_email, workspace_id),
+                            (workspace_title, contact_email, workspace_id),
                         )
                         brand_owner_id = int(cur.lastrowid)
                     else:
@@ -212,7 +263,7 @@ def signup_page():
                 
                 users_columns = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
                 cols = ["username", "password_hash", "account_name"]
-                vals = [username, generate_password_hash(password), account_name]
+                vals = [username, hash_password(password), workspace_title]
                 if "role" in users_columns:
                     cols.append("role")
                     vals.append("brand_owner_admin" if account_type == "brand_owner" else "builder")
@@ -228,12 +279,21 @@ def signup_page():
                 if "account_type" in users_columns:
                     cols.append("account_type")
                     vals.append(account_type)
-                if "security_question" in users_columns:
+                if "email" in users_columns:
+                    cols.append("email")
+                    vals.append(contact_email)
+                if "first_name" in users_columns:
+                    cols.append("first_name")
+                    vals.append(first_name)
+                if "last_name" in users_columns:
+                    cols.append("last_name")
+                    vals.append(last_name)
+                if "security_question" in users_columns and security_question and security_answer:
                     cols.append("security_question")
                     vals.append(security_question)
-                if "security_answer_hash" in users_columns:
+                if "security_answer_hash" in users_columns and security_question and security_answer:
                     cols.append("security_answer_hash")
-                    vals.append(generate_password_hash(security_answer))
+                    vals.append(hash_password(security_answer))
                     
                 query = f"INSERT INTO users ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
                 cur_user = conn.execute(query, tuple(vals))
@@ -244,7 +304,7 @@ def signup_page():
                     "signup_completed",
                     "workspace",
                     workspace_id,
-                    f"{account_type.replace('_', ' ').title()} workspace created for {account_name}",
+                    f"{account_type.replace('_', ' ').title()} workspace created for {workspace_title}",
                     workspace_id=workspace_id,
                     manufacturer_id=manufacturer_id or 0,
                 )
@@ -435,7 +495,7 @@ def google_onboarding_page():
                     suffix += 1
                     username = f"{username_seed}{suffix}"
                 cols = ["username", "password_hash", "account_name"]
-                vals = [username, generate_password_hash(uuid.uuid4().hex), account_name]
+                vals = [username, hash_password(uuid.uuid4().hex), account_name]
                 if "account_type" in users_columns:
                     cols.append("account_type")
                     vals.append(account_type)
@@ -516,12 +576,12 @@ def reset_password_page():
                 error = "No security question set for this account."
             elif clean_text(row["security_question"]) != security_question:
                 error = "Security question does not match."
-            elif not check_password_hash(clean_text(row["security_answer_hash"]), security_answer):
+            elif not verify_password(clean_text(row["security_answer_hash"]), security_answer):
                 error = "Security answer is incorrect."
             else:
                 conn.execute(
                     "UPDATE users SET password_hash=? WHERE id=?",
-                    (generate_password_hash(new_password), int(row["id"])),
+                    (hash_password(new_password), int(row["id"])),
                 )
                 conn.commit()
                 success = "Password updated. You can now log in."

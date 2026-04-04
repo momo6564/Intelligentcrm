@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }}</title>
+  <style>
+    :root{
+      --bg:#0a4a45;
+      --panel:#f7fbf9;
+      --text:#143043;
+      --muted:#5f7280;
+      --line:#d6e4de;
+      --accent:#13d56b;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family:Segoe UI,system-ui,-apple-system,sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(19,213,107,.16), transparent 28%),
+        linear-gradient(180deg, #ecf6f0, #f5f8fb 32%, #eef4ef);
+      padding:32px 16px;
+    }
+    .wrap{
+      width:min(860px, 100%);
+      margin:0 auto;
+      display:grid;
+      gap:18px;
+    }
+    .hero,
+    .section{
+      background:rgba(255,255,255,.9);
+      border:1px solid var(--line);
+      border-radius:24px;
+      box-shadow:0 18px 40px rgba(5, 34, 45, .08);
+    }
+    .hero{
+      padding:28px;
+    }
+    .kicker{
+      color:#0e7a52;
+      font-size:.8rem;
+      font-weight:700;
+      text-transform:uppercase;
+      letter-spacing:.18em;
+    }
+    h1{
+      margin:10px 0 8px;
+      font-size:2.1rem;
+      letter-spacing:-.03em;
+    }
+    .summary{
+      max-width:48rem;
+      color:var(--muted);
+      line-height:1.6;
+    }
+    .grid{
+      display:grid;
+      gap:16px;
+    }
+    .section{
+      padding:22px 24px;
+    }
+    .section h2{
+      margin:0 0 8px;
+      font-size:1.12rem;
+    }
+    .section p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.65;
+    }
+    .actions{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:11rem;
+      padding:13px 18px;
+      border-radius:999px;
+      text-decoration:none;
+      font-weight:700;
+      border:1px solid var(--line);
+    }
+    .btn-primary{
+      background:linear-gradient(180deg, #18df72, var(--accent));
+      color:#07261b;
+      border-color:#13c862;
+    }
+    .btn-secondary{
+      color:var(--text);
+      background:#fff;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="kicker">{{ page_kicker }}</div>
+      <h1>{{ page_title }}</h1>
+      <p class="summary">{{ page_summary }}</p>
+      <div class="actions" style="margin-top:18px;">
+        <a class="btn btn-primary" href="/signup">Back to sign up</a>
+        <a class="btn btn-secondary" href="/login">Go to login</a>
+      </div>
+    </section>
+
+    <section class="grid">
+      {% for section in sections %}
+        <article class="section">
+          <h2>{{ section.title }}</h2>
+          <p>{{ section.body }}</p>
+        </article>
+      {% endfor %}
+    </section>
+  </main>
+</body>
+</html>

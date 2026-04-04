@@ -4,115 +4,281 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Login - Greek Chapters CRM</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root{
-      --bg:#edf6ff;
-      --line:#bfd6fb;
-      --text:#17355f;
-      --muted:#5674a5;
-      --brand:#2e7dff;
-      --brand-strong:#1a66ed;
+      --forest:#0c4b46;
+      --forest-deep:#083935;
+      --mint:#18dd72;
+      --mint-deep:#11c963;
+      --paper:#fbfdfb;
+      --line:#d7e3dc;
+      --text:#17303d;
+      --muted:#617380;
+      --soft:#eef5f1;
     }
     *{ box-sizing:border-box; }
     body{
       margin:0;
       min-height:100vh;
-      font-family:"Manrope","Segoe UI",sans-serif;
+      font-family:Segoe UI,system-ui,-apple-system,sans-serif;
       color:var(--text);
       background:
-        radial-gradient(70rem 34rem at -8% -20%, rgba(72,149,255,.34), transparent 45%),
-        radial-gradient(65rem 30rem at 112% 12%, rgba(125,193,255,.30), transparent 45%),
-        linear-gradient(180deg, #f4f9ff, var(--bg));
+        radial-gradient(circle at top left, rgba(24,221,114,.22), transparent 24%),
+        linear-gradient(135deg, #edf6f0, #f7fafc 44%, #eef6f4);
+      padding:20px 16px;
       display:grid;
       place-items:center;
-      padding:16px;
     }
-    .card{
-      width:min(460px, 96vw);
-      border:1px solid var(--line);
-      background:linear-gradient(180deg, #ffffff, #f7fbff);
-      border-radius:22px;
-      box-shadow:0 22px 44px rgba(32,78,152,.16);
-      padding:22px;
+    .shell{
+      width:min(900px, 100%);
       display:grid;
-      gap:12px;
-    }
-    .title{ margin:0; font-size:1.35rem; font-weight:800; letter-spacing:-.01em; }
-    .subtitle{ color:var(--muted); font-size:.9rem; }
-    .field{ display:grid; gap:5px; font-size:.9rem; font-weight:600; }
-    .field input{
+      grid-template-columns:minmax(0, .95fr) minmax(0, 1.05fr);
+      background:rgba(255,255,255,.9);
       border:1px solid var(--line);
-      border-radius:12px;
-      padding:10px 12px;
+      border-radius:30px;
+      overflow:hidden;
+      box-shadow:0 24px 70px rgba(7, 32, 30, .14);
+    }
+    .brand-side{
+      background:
+        linear-gradient(165deg, rgba(7,57,53,.97), rgba(12,75,70,.93)),
+        linear-gradient(180deg, var(--forest), var(--forest-deep));
+      color:#ebfff4;
+      padding:34px 30px;
+      display:grid;
+      align-content:space-between;
+      gap:24px;
+      position:relative;
+      overflow:hidden;
+    }
+    .brand-side::after{
+      content:"";
+      position:absolute;
+      top:-3rem;
+      right:-2rem;
+      width:12rem;
+      height:12rem;
+      border-radius:50%;
+      background:rgba(24,221,114,.12);
+    }
+    .brand-mark{
+      width:56px;
+      height:56px;
+      border-radius:18px;
+      background:linear-gradient(180deg, rgba(24,221,114,.95), rgba(17,201,99,.92));
+      color:#063022;
+      display:grid;
+      place-items:center;
+      font-weight:800;
+      letter-spacing:.04em;
+    }
+    .brand-copy{
+      position:relative;
+      z-index:1;
+    }
+    .brand-copy h1{
+      margin:0 0 10px;
+      font-size:2.15rem;
+      line-height:1.04;
+      letter-spacing:-.04em;
+    }
+    .brand-copy p{
+      margin:0;
+      color:rgba(235,255,244,.78);
+      line-height:1.65;
+    }
+    .mini-card{
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.08);
+      border-radius:20px;
+      padding:16px 18px;
+      position:relative;
+      z-index:1;
+    }
+    .mini-card strong{
+      display:block;
+      margin-bottom:6px;
+      font-size:.95rem;
+    }
+    .mini-card span{
+      color:rgba(235,255,244,.74);
+      font-size:.92rem;
+      line-height:1.5;
+    }
+    .form-side{
+      background:linear-gradient(180deg, #ffffff, var(--paper));
+      padding:34px 30px;
+      display:grid;
+      gap:18px;
+      align-content:center;
+    }
+    .eyebrow{
+      color:#0f7a52;
+      text-transform:uppercase;
+      letter-spacing:.18em;
+      font-size:.78rem;
+      font-weight:700;
+    }
+    .heading{
+      margin:0;
+      font-size:1.85rem;
+      letter-spacing:-.03em;
+    }
+    .subheading{
+      margin:0;
+      color:var(--muted);
+      line-height:1.6;
+      font-size:.97rem;
+    }
+    .error{
+      border:1px solid #f3c3cf;
+      background:#fff5f7;
+      color:#b73c5d;
+      border-radius:16px;
+      padding:12px 14px;
+      font-size:.92rem;
+    }
+    .field{
+      display:grid;
+      gap:8px;
+    }
+    .field label{
+      font-size:.9rem;
+      font-weight:700;
+      color:#4f6270;
+    }
+    .field input{
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:#f8fbf9;
+      padding:15px 16px;
       font:inherit;
-      color:#133b6f;
-      background:#fff;
+      color:var(--text);
+      transition:.16s ease;
     }
     .field input:focus{
       outline:none;
-      border-color:#75aeff;
-      box-shadow:0 0 0 3px rgba(46,125,255,.20);
+      border-color:#7edaa7;
+      background:#fff;
+      box-shadow:0 0 0 4px rgba(24,221,114,.14);
     }
-    .btn{
-      border:1px solid var(--brand);
-      background:linear-gradient(180deg, var(--brand), var(--brand-strong));
-      color:#fff;
+    .submit-btn,
+    .oauth-btn{
+      width:100%;
+      border-radius:18px;
+      border:1px solid var(--line);
+      padding:14px 18px;
       font:inherit;
       font-weight:700;
-      border-radius:12px;
-      padding:10px 12px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      text-decoration:none;
+      transition:.16s ease;
+    }
+    .submit-btn{
+      background:linear-gradient(180deg, var(--mint), var(--mint-deep));
+      border-color:#13c862;
+      color:#07261b;
       cursor:pointer;
+      box-shadow:0 14px 26px rgba(17,201,99,.18);
     }
-    .btn:hover{ filter:brightness(1.03); }
-    .error{
-      border:1px solid #ffc9d5;
-      background:#fff2f6;
-      color:#b03756;
-      border-radius:10px;
-      padding:8px 10px;
-      font-size:.84rem;
+    .submit-btn:hover{
+      transform:translateY(-1px);
+      box-shadow:0 18px 30px rgba(17,201,99,.24);
     }
-    .meta{
-      border:1px solid var(--line);
-      background:#f3f8ff;
-      border-radius:12px;
-      padding:10px;
-      font-size:.82rem;
-      color:#486b9f;
-      line-height:1.4;
+    .submit-btn[disabled]{
+      opacity:.82;
+      cursor:wait;
+      transform:none;
     }
-    a{ color:#165fd6; font-weight:700; text-decoration:none; }
-    a:hover{ text-decoration:underline; }
+    .oauth-btn{
+      background:#fff;
+      color:var(--text);
+    }
+    .oauth-btn:hover{
+      background:#f8fbf9;
+    }
+    .links{
+      display:grid;
+      gap:8px;
+      text-align:center;
+      color:var(--muted);
+      font-size:.95rem;
+    }
+    .links a{
+      color:#0b6040;
+      font-weight:700;
+      text-decoration:none;
+    }
+    @media (max-width:860px){
+      .shell{
+        grid-template-columns:1fr;
+      }
+    }
   </style>
 </head>
 <body>
-  <form method="post" class="card">
-    <h1 class="title">Welcome Back</h1>
-    <div class="subtitle">Sign in to your workspace.</div>
-    {% if error %}<div class="error">{{ error }}</div>{% endif %}
-    <input type="hidden" name="next" value="{{ next_path }}">
-    <label class="field">Username
-      <input name="username" autocomplete="username" required>
-    </label>
-    <label class="field">Password
-      <input name="password" type="password" autocomplete="current-password" required>
-    </label>
-    <button type="submit" class="btn">Login</button>
-    {% if google_enabled %}
-    <div class="meta">
-      Or continue with Google.
-      <div style="margin-top:8px;">
-        <a href="/google/login?next={{ next_path | urlencode }}" class="btn" style="display:inline-block;text-align:center;width:100%;text-decoration:none;">Sign in with Google</a>
+  <form method="post" class="shell" id="login-form">
+    <section class="brand-side" aria-hidden="true">
+      <div class="brand-mark">GC</div>
+      <div class="brand-copy">
+        <h1>Get back to the dashboard fast.</h1>
+        <p>Lean sign-in, faster page startup, and no dead-end auth buttons.</p>
       </div>
-    </div>
-    {% endif %}
-    <div class="subtitle">Need a new workspace? <a href="/signup">Create account</a></div>
-    <div class="subtitle">Forgot password? <a href="/reset-password">Reset it</a></div>
-    <div class="subtitle">Customer tracking code? <a href="/ops/track">Open customer tracker</a></div>
-  
+      <div class="mini-card">
+        <strong>Quick access</strong>
+        <span>Use your email or username, jump straight back into your workspace, or switch to Google if it is enabled.</span>
+      </div>
+    </section>
+
+    <section class="form-side">
+      <div>
+        <div class="eyebrow">Sign In</div>
+        <h1 class="heading">Welcome back</h1>
+        <p class="subheading">This version stays in your app’s visual language and responds immediately when you click.</p>
+      </div>
+
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+      <input type="hidden" name="next" value="{{ next_path }}">
+
+      <div class="field">
+        <label for="login">Email or Username</label>
+        <input id="login" name="login" autocomplete="username" required>
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+
+      <button type="submit" class="submit-btn" id="login-submit">Sign In</button>
+
+      {% if google_enabled %}
+        <a href="/google/login?next={{ next_path | urlencode }}" class="oauth-btn">Continue with Google</a>
+      {% endif %}
+
+      <div class="links">
+        <div>Need a new workspace? <a href="/signup">Create account</a></div>
+        <div>Forgot password? <a href="/reset-password">Reset it</a></div>
+        <div>Customer tracking code? <a href="/ops/track">Open customer tracker</a></div>
+      </div>
+    </section>
   </form>
+
+  <script>
+    (() => {
+      const form = document.getElementById("login-form");
+      const submit = document.getElementById("login-submit");
+      if (!form || !submit) return;
+
+      form.addEventListener("submit", () => {
+        submit.disabled = true;
+        submit.textContent = "Signing In...";
+      });
+    })();
+  </script>
 </body>
 </html>

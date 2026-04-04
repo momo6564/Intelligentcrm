@@ -10,6 +10,8 @@ from ..utils.workspace import workspace_id_for_user
 
 bp = Blueprint('main', __name__)
 
+DASHBOARD_LIST_LIMIT = 24
+
 def render_app(template_name: str, **context):
     context.setdefault("me", get_session_user())
     return render_template(template_name, **context)
@@ -55,6 +57,54 @@ def index():
             "start_free": default_cta_href,
             "track": url_for("ops.ops_customer_track"),
         },
+    )
+
+
+@bp.route("/terms")
+def terms_page():
+    return render_template(
+        "legal/simple_page.html",
+        page_title="Terms of Service",
+        page_kicker="Legal",
+        page_summary="Short-form workspace terms for using the Greek Chapters platform.",
+        sections=[
+            {
+                "title": "Use of the platform",
+                "body": "Use the app for legitimate relationship management, order tracking, and team collaboration. Do not misuse the platform for unlawful activity, credential abuse, or scraping protected data.",
+            },
+            {
+                "title": "Your workspace data",
+                "body": "You are responsible for the data entered into your workspace, including contacts, orders, notes, and files. Keep credentials secure and limit access to authorized teammates.",
+            },
+            {
+                "title": "Availability",
+                "body": "We aim to keep the product fast and available, but uptime, features, and workflows may change as the product evolves.",
+            },
+        ],
+    )
+
+
+@bp.route("/privacy")
+def privacy_page():
+    return render_template(
+        "legal/simple_page.html",
+        page_title="Privacy Policy",
+        page_kicker="Legal",
+        page_summary="A simple overview of how account and workspace information is handled.",
+        sections=[
+            {
+                "title": "What we collect",
+                "body": "We store the account details, workspace records, and operational data needed to let you sign in, manage contacts, and track orders.",
+            },
+            {
+                "title": "How it is used",
+                "body": "Information is used to operate the product, authenticate users, support workspace features, and improve performance and reliability.",
+            },
+            {
+                "title": "Control",
+                "body": "Workspace owners should avoid storing unnecessary sensitive data and should manage teammate access carefully.",
+            },
+        ],
     )
 
 @bp.route("/dashboard")
@@ -153,6 +203,7 @@ def dashboard_page():
         key=lambda r: (clean_text(r.get("added_at")), clean_text(r.get("name"))),
         reverse=True,
     )
+    total_chapters_served = len(chapters_served)
     closed_vendor_rows = conn.execute(
         """
         SELECT c.name, c.connection, c.created_at, v.id AS vendor_id, v.category, v.state, v.city, v.website, v.email
@@ -212,6 +263,7 @@ def dashboard_page():
         key=lambda r: (clean_text(r.get("added_at")), clean_text(r.get("name"))),
         reverse=True,
     )
+    total_vendors_served = len(vendors_served)
 
     school_map = {}
     for row in chapters_served:
@@ -241,6 +293,7 @@ def dashboard_page():
         ],
         key=lambda r: (-int(r.get("chapters_count") or 0), r.get("school", "")),
     )
+    total_schools_served = len(schools_served)
 
     org_type_lookup = {clean_text(name).lower(): clean_text(kind) for name, kind in Config.ORG_MAP.values()}
     org_map = {}
@@ -268,6 +321,7 @@ def dashboard_page():
         ],
         key=lambda r: (-(int(r.get("chapters_count") or 0) + int(r.get("vendors_count") or 0)), r.get("org", "")),
     )
+    total_orgs_served = len(orgs_served)
 
     for row in vendors_served:
         row["detail_href"] = (
@@ -365,21 +419,59 @@ def dashboard_page():
     ]
 
     metrics = {
-        "schools_served": len(schools_served),
-        "orgs_served": len(orgs_served),
-        "chapters_served": len(chapters_served),
-        "vendors_served": len(vendors_served),
+        "schools_served": total_schools_served,
+        "orgs_served": total_orgs_served,
+        "chapters_served": total_chapters_served,
+        "vendors_served": total_vendors_served,
     }
 
-    institution_rows = conn.execute(
+    served_school_names = {
+        clean_text(row.get("school"))
+        for row in schools_served
+        if clean_text(row.get("school"))
+    }
+    served_institution_rows = conn.execute(
         """
-        SELECT id, location_name, city, state, latitude, longitude, control, institution_level
-        FROM institutions
-        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-          AND trim(coalesce(latitude, '')) <> ''
-          AND trim(coalesce(longitude, '')) <> ''
-        """
+        SELECT name, connection
+        FROM crm_contacts
+        WHERE workspace_id=?
+          AND type IN ('school', 'other')
+          AND lower(coalesce(status, ''))='closed'
+        ORDER BY id DESC
+        """,
+        (workspace_id,),
     ).fetchall()
+    institution_ids: set[str] = set()
+    institution_names = {name.lower() for name in served_school_names}
+    for row in served_institution_rows:
+        connection = clean_text(row["connection"])
+        if connection.startswith("institution:"):
+            institution_ids.add(connection.split(":", 1)[1])
+        name = clean_text(row["name"]).lower()
+        if name:
+            institution_names.add(name)
+
+    institution_rows = []
+    where_clauses = []
+    params: list[str] = []
+    if institution_ids:
+        where_clauses.append(f"id IN ({','.join('?' for _ in institution_ids)})")
+        params.extend(sorted(institution_ids))
+    if institution_names:
+        where_clauses.append(f"lower(location_name) IN ({','.join('?' for _ in institution_names)})")
+        params.extend(sorted(institution_names))
+    if where_clauses:
+        institution_rows = conn.execute(
+            f"""
+            SELECT id, location_name, city, state, latitude, longitude, control, institution_level
+            FROM institutions
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+              AND trim(coalesce(latitude, '')) <> ''
+              AND trim(coalesce(longitude, '')) <> ''
+              AND ({' OR '.join(where_clauses)})
+            """,
+            tuple(params),
+        ).fetchall()
     institution_by_id = {}
     institution_by_name = {}
     for row in institution_rows:
@@ -429,17 +521,6 @@ def dashboard_page():
             continue
         upsert_map_point(inst, school_row=row)
 
-    served_institution_rows = conn.execute(
-        """
-        SELECT name, connection
-        FROM crm_contacts
-        WHERE workspace_id=?
-          AND type IN ('school', 'other')
-          AND lower(coalesce(status, ''))='closed'
-        ORDER BY id DESC
-        """,
-        (workspace_id,),
-    ).fetchall()
     for row in served_institution_rows:
         connection = clean_text(row["connection"])
         inst = None
@@ -462,10 +543,10 @@ def dashboard_page():
     return render_app(
         "dashboards/dashboard.html",
         metrics=metrics,
-        schools_served=schools_served,
-        orgs_served=orgs_served,
-        chapters_served=chapters_served,
-        vendors_served=vendors_served,
+        schools_served=schools_served[:DASHBOARD_LIST_LIMIT],
+        orgs_served=orgs_served[:DASHBOARD_LIST_LIMIT],
+        chapters_served=chapters_served[:DASHBOARD_LIST_LIMIT],
+        vendors_served=vendors_served[:DASHBOARD_LIST_LIMIT],
         served_map_points=served_map_points,
         needs_follow_up=needs_follow_up,
         recent_activity=recent_activity,

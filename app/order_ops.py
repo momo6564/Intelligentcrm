@@ -2092,10 +2092,26 @@ def brand_owner_orders_payload(conn, brand_owner_workspace_id: str) -> dict:
         """,
         (bw,),
     ).fetchall()
+    manufacturer_lookup = {
+        clean_text(row["workspace_id"]): clean_text(row["account_name"])
+        for row in conn.execute(
+            """
+            SELECT workspace_id, account_name
+            FROM users
+            WHERE trim(coalesce(workspace_id,''))<>''
+              AND lower(coalesce(account_type,''))='manufacturer'
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        if clean_text(row["workspace_id"])
+    }
     orders_out = []
     for row in rows:
         schedule = _schedule_metrics(conn, int(row["id"]))
         order_dict = _order_row_to_dict(row)
+        order_dict["manufacturer_name"] = clean_text(
+            order_dict.get("manufacturer_name")
+        ) or manufacturer_lookup.get(clean_text(order_dict.get("workspace_id")), "")
         order_dict["today_schedule_label"] = clean_text(order_dict.get("today_schedule_label")) or clean_text(schedule["today_schedule_label"])
         order_dict["overdue_day_count"] = int(order_dict.get("overdue_day_count") or schedule["overdue_day_count"] or 0)
         order_dict["buffer_day_count"] = int(order_dict.get("buffer_day_count") or schedule["buffer_day_count"] or 0)
@@ -2141,7 +2157,27 @@ def brand_owner_manufacturers_payload(conn, brand_owner_workspace_id: str) -> li
         """,
         (bw,),
     ).fetchall()
-    return [{"workspace_id": clean_text(row["workspace_id"]), "order_count": int(row["order_count"] or 0)} for row in rows]
+    manufacturer_lookup = {
+        clean_text(row["workspace_id"]): clean_text(row["account_name"])
+        for row in conn.execute(
+            """
+            SELECT workspace_id, account_name
+            FROM users
+            WHERE trim(coalesce(workspace_id,''))<>''
+              AND lower(coalesce(account_type,''))='manufacturer'
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        if clean_text(row["workspace_id"])
+    }
+    return [
+        {
+            "workspace_id": clean_text(row["workspace_id"]),
+            "manufacturer_name": manufacturer_lookup.get(clean_text(row["workspace_id"]), ""),
+            "order_count": int(row["order_count"] or 0),
+        }
+        for row in rows
+    ]
 
 
 def redeem_brand_owner_tracking_code(conn, brand_owner_workspace_id: str, access_code: str, user_id: int) -> dict:

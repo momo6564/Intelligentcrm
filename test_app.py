@@ -51,6 +51,7 @@ class AppTests(unittest.TestCase):
                 "account_type": account_type,
                 "account_name": manufacturer_name,
                 "contact_email": f"{username}@example.com",
+                "agree_terms": "1",
                 "security_question": Config.SECURITY_QUESTIONS[0],
                 "security_answer": "TestAnswer123",
             },
@@ -104,6 +105,34 @@ class AppTests(unittest.TestCase):
         self.assertIn('name="account_type"', body)
         self.assertIn("Vendor / Brand Owner", body)
         self.assertIn("Manufacturer", body)
+        self.assertIn("/terms", body)
+        self.assertIn("/privacy", body)
+        self.assertNotIn("Create your Atlas account", body)
+
+    def test_terms_and_privacy_pages_load(self):
+        anon = self.app.test_client()
+        terms = anon.get("/terms")
+        privacy = anon.get("/privacy")
+        self.assertEqual(terms.status_code, 200)
+        self.assertEqual(privacy.status_code, 200)
+        self.assertIn("Terms of Service", terms.get_data(as_text=True))
+        self.assertIn("Privacy Policy", privacy.get_data(as_text=True))
+
+    def test_signup_requires_terms_agreement(self):
+        resp = self.client.post(
+            "/signup",
+            data={
+                "first_name": "No",
+                "last_name": "Terms",
+                "email": "noterms@example.com",
+                "password": "secret123",
+                "account_type": "manufacturer",
+                "company": "No Terms Co",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Please agree to the Terms of Service and Privacy Policy.", resp.get_data(as_text=True))
 
     def test_google_onboarding_requires_pending_session(self):
         anon = self.app.test_client()
@@ -470,6 +499,32 @@ class AppTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertIn("/dashboard", resp.headers.get("Location", ""))
 
+    def test_simplified_signup_form_flow(self):
+        email = f"user_{uuid.uuid4().hex[:8]}@example.com"
+        resp = self.client.post(
+            "/signup",
+            data={
+                "first_name": "Ava",
+                "last_name": "Stone",
+                "company": "Greenline Manufacturing",
+                "email": email,
+                "password": "secret123",
+                "account_type": "manufacturer",
+                "agree_terms": "1",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/dashboard", resp.headers.get("Location", ""))
+        self.client.get("/logout")
+        login_resp = self.client.post(
+            "/login",
+            data={"login": email, "password": "secret123", "next": "/dashboard"},
+            follow_redirects=False,
+        )
+        self.assertEqual(login_resp.status_code, 302)
+        self.assertIn("/dashboard", login_resp.headers.get("Location", ""))
+
     def test_brand_owner_signup_redirects_to_brand_workspace(self):
         username = f"brand_{uuid.uuid4().hex[:8]}"
         self._signup(
@@ -501,6 +556,7 @@ class AppTests(unittest.TestCase):
                 "account_type": "brand_owner",
                 "account_name": "Atlas Brand Group",
                 "contact_email": f"{brand_username}@example.com",
+                "agree_terms": "1",
                 "security_question": Config.SECURITY_QUESTIONS[0],
                 "security_answer": "TestAnswer123",
             },
@@ -520,6 +576,7 @@ class AppTests(unittest.TestCase):
                 "account_type": "manufacturer",
                 "account_name": "Maker One",
                 "contact_email": "maker1@example.com",
+                "agree_terms": "1",
                 "security_question": Config.SECURITY_QUESTIONS[0],
                 "security_answer": "TestAnswer123",
             },
@@ -548,6 +605,7 @@ class AppTests(unittest.TestCase):
                 "account_type": "manufacturer",
                 "account_name": "Maker Two",
                 "contact_email": "maker2@example.com",
+                "agree_terms": "1",
                 "security_question": Config.SECURITY_QUESTIONS[0],
                 "security_answer": "TestAnswer123",
             },
@@ -587,6 +645,7 @@ class AppTests(unittest.TestCase):
                 "account_type": "brand_owner",
                 "account_name": "Code Brand Group",
                 "contact_email": f"{brand_username}@example.com",
+                "agree_terms": "1",
                 "security_question": Config.SECURITY_QUESTIONS[0],
                 "security_answer": "TestAnswer123",
             },
@@ -602,6 +661,7 @@ class AppTests(unittest.TestCase):
                 "account_type": "manufacturer",
                 "account_name": "Code Maker",
                 "contact_email": "codemaker@example.com",
+                "agree_terms": "1",
                 "security_question": Config.SECURITY_QUESTIONS[0],
                 "security_answer": "TestAnswer123",
             },

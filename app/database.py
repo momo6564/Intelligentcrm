@@ -4,9 +4,9 @@ import csv
 import re
 from difflib import SequenceMatcher
 from flask import g
-from werkzeug.security import generate_password_hash
 from .config import Config
 from .utils.text_utils import clean_text, norm_state, norm_org
+from .utils.passwords import hash_password
 from .utils.data_parse import (
     parse_meta_from_file,
     detect_status,
@@ -17,6 +17,8 @@ from .utils.data_parse import (
     detect_notes,
     parse_location,
 )
+
+CRM_SCHEMA_VERSION = 1
 
 def get_connection() -> sqlite3.Connection:
     if 'db' not in g:
@@ -30,6 +32,11 @@ def close_connection(e=None):
         db.close()
 
 def ensure_crm_tables(conn: sqlite3.Connection) -> None:
+    current_version_row = conn.execute("PRAGMA user_version").fetchone()
+    current_version = int(current_version_row[0]) if current_version_row else 0
+    if current_version >= CRM_SCHEMA_VERSION:
+        return
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS leads (
@@ -431,6 +438,10 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
     if "email" not in users_columns:
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "first_name" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN first_name TEXT")
+    if "last_name" not in users_columns:
+        conn.execute("ALTER TABLE users ADD COLUMN last_name TEXT")
     conn.execute("UPDATE users SET account_type='manufacturer' WHERE trim(coalesce(account_type,''))=''")
     crm_contact_columns = {row[1] for row in conn.execute("PRAGMA table_info(crm_contacts)").fetchall()}
     if "workspace_id" not in crm_contact_columns:
@@ -481,6 +492,8 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE feedback_messages ADD COLUMN workspace_id TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_brand_owners_workspace ON brand_owners(workspace_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_users_account_type ON users(account_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_manufacturer_brand_links_mw ON manufacturer_brand_links(manufacturer_workspace_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_manufacturer_brand_links_bw ON manufacturer_brand_links(brand_owner_workspace_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ops_order_brand_access_bw ON ops_order_brand_access(brand_owner_workspace_id, status)")
@@ -600,6 +613,7 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_team_invites_team ON team_invites(team_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_team_invites_code ON team_invites(invite_code)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_workspace ON activities(workspace_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activities_workspace_created ON activities(workspace_id, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_workspace ON leads(workspace_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_tasks_workspace_due_status ON crm_tasks(workspace_id, due_date, status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_notes_workspace_contact ON crm_notes(workspace_id, crm_contact_id)")
@@ -607,6 +621,7 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_activities_workspace_action ON crm_activities(workspace_id, action, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contact_tags_workspace_contact ON crm_contact_tags(workspace_id, crm_contact_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_research_prompts_user_category ON user_research_prompts(user_id, category)")
+    conn.execute(f"PRAGMA user_version = {CRM_SCHEMA_VERSION}")
     conn.commit()
 
 def derive_workspace_id(account_name: str = "", username: str = "", user_id: int = 0) -> str:
@@ -661,12 +676,12 @@ def ensure_default_users(conn: sqlite3.Connection) -> None:
         if "role" in users_columns and "workspace_id" in users_columns:
             conn.execute(
                 "INSERT INTO users(username, password_hash, account_name, role, workspace_id) VALUES(?, ?, ?, 'admin', ?)",
-                (username, generate_password_hash(password), account_name, workspace_id),
+                (username, hash_password(password), account_name, workspace_id),
             )
         else:
             conn.execute(
                 "INSERT INTO users(username, password_hash, account_name) VALUES(?, ?, ?)",
-                (username, generate_password_hash(password), account_name),
+                (username, hash_password(password), account_name),
             )
     conn.commit()
 
