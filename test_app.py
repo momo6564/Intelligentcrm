@@ -180,6 +180,44 @@ class AppTests(unittest.TestCase):
         self.assertEqual(me.get("account_type"), "manufacturer")
         self.assertEqual(me.get("account_name"), "Maker Google Co")
 
+    def test_google_callback_uses_token_userinfo_without_extra_fetch(self):
+        self._signup("googlefast", "Google Fast Co")
+
+        class FakeGoogle:
+            def __init__(self):
+                self.userinfo_fetches = []
+
+            def authorize_access_token(self):
+                return {
+                    "access_token": "test-token",
+                    "userinfo": {
+                        "sub": f"google-{uuid.uuid4().hex[:8]}",
+                        "email": "googlefast@example.com",
+                        "name": "Google Fast",
+                    },
+                }
+
+            def get(self, endpoint, token=None):
+                self.userinfo_fetches.append(endpoint)
+                raise AssertionError("Google userinfo fetch should not run when token already includes userinfo.")
+
+        original_google = getattr(self.app, "google_oauth", None)
+        self.app.google_oauth = FakeGoogle()
+        try:
+            with self.client.session_transaction() as sess:
+                sess["google_next"] = "/"
+                sess["google_nonce"] = "nonce"
+
+            resp = self.client.get("/google/callback", follow_redirects=False)
+            self.assertEqual(resp.status_code, 302)
+            self.assertIn("/dashboard", resp.headers.get("Location", ""))
+            self.assertEqual(self.app.google_oauth.userinfo_fetches, [])
+
+            me = self._me()
+            self.assertEqual(me.get("email"), "googlefast@example.com")
+        finally:
+            self.app.google_oauth = original_google
+
     def test_api_requires_login(self):
         anon = self.app.test_client()
         resp = anon.get("/api/m/chapters")

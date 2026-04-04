@@ -129,6 +129,30 @@ def _unique_username(conn, email: str = "", fallback: str = "") -> str:
         username = f"{seed}{suffix}"
     return username
 
+
+def _google_userinfo_from_token(google, token: dict) -> dict:
+    direct_userinfo = token.get("userinfo")
+    if isinstance(direct_userinfo, dict):
+        return direct_userinfo
+
+    id_token_claims = token.get("id_token_claims")
+    if isinstance(id_token_claims, dict):
+        return id_token_claims
+
+    endpoints = ["userinfo", "https://openidconnect.googleapis.com/v1/userinfo"]
+    for endpoint in endpoints:
+        try:
+            resp = google.get(endpoint, token=token)
+        except Exception:
+            if endpoint == endpoints[-1]:
+                current_app.logger.exception("Google OAuth userinfo request failed.")
+            continue
+        if resp is not None and resp.ok:
+            payload = resp.json()
+            return payload if isinstance(payload, dict) else {}
+        current_app.logger.error("Google OAuth userinfo failed: %s", getattr(resp, "text", "no response"))
+    return {}
+
 @bp.route("/login", methods=["GET", "POST"])
 def login_page():
     error = clean_text(request.args.get("error"))
@@ -345,24 +369,12 @@ def google_callback():
         session.pop("google_nonce", None)
         return redirect(url_for("auth.login_page", error="google_state"))
     except Exception:
+        session.pop("google_next", None)
+        session.pop("google_nonce", None)
         current_app.logger.exception("Google OAuth token exchange failed.")
         return redirect(url_for("auth.login_page", error="google_failed"))
-    userinfo = None
-    try:
-        nonce = session.pop("google_nonce", None)
-        userinfo = google.parse_id_token(token, nonce=nonce)
-    except Exception:
-        current_app.logger.exception("Google OAuth id_token parsing failed.")
-        userinfo = None
-    if not userinfo:
-        try:
-            resp = google.get("https://openidconnect.googleapis.com/v1/userinfo", token=token)
-            if resp is not None and resp.ok:
-                userinfo = resp.json()
-            else:
-                current_app.logger.error("Google OAuth userinfo failed: %s", getattr(resp, "text", "no response"))
-        except Exception:
-            current_app.logger.exception("Google OAuth userinfo request failed.")
+    session.pop("google_nonce", None)
+    userinfo = _google_userinfo_from_token(google, token)
     if not userinfo:
         return redirect(url_for("auth.login_page", error="google_failed"))
 

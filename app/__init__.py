@@ -1,6 +1,12 @@
 from flask import Flask
 import os
 
+GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_API_BASE_URL = "https://openidconnect.googleapis.com/v1/"
+GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs"
+
 def create_app(config_class=None):
     from .config import Config
 
@@ -56,7 +62,11 @@ def create_app(config_class=None):
             name="google",
             client_id=google_client_id,
             client_secret=google_client_secret,
-            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            authorize_url=GOOGLE_AUTHORIZE_URL,
+            access_token_url=GOOGLE_TOKEN_URL,
+            api_base_url=GOOGLE_API_BASE_URL,
+            userinfo_endpoint=GOOGLE_USERINFO_URL,
+            jwks_uri=GOOGLE_JWKS_URI,
             client_kwargs={"scope": "openid email profile"},
         )
         app.google_oauth = google
