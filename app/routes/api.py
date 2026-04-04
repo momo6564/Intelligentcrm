@@ -10,7 +10,7 @@ from werkzeug.utils import secure_filename
 from ..auth import login_required, get_session_user
 from ..database import get_connection, ensure_crm_tables, ensure_vendor_table, ensure_institutions_table, ensure_chapters_table, log_activity, log_lead_activity
 from ..config import Config
-from ..services.dashboard import manufacturer_dashboard_snapshot, manufacturer_dashboard_dataset
+from ..services.dashboard import manufacturer_dashboard_snapshot, manufacturer_dashboard_dataset, workspace_school_map_snapshot
 from ..services.chapters import fetch_normalized_rows, get_chapter_by_id
 from ..services.institutions import fetch_institution_profile
 from ..services.vendors import vendor_competitors, build_vendor_hot_leads
@@ -487,6 +487,7 @@ def api_team_summary():
         (team_id,),
     ).fetchall()
     workspace_id = clean_text(team["workspace_id"])
+    school_map = workspace_school_map_snapshot(conn, workspace_id)
     counts = conn.execute(
         """
         SELECT created_by_user_id,
@@ -620,6 +621,7 @@ def api_team_summary():
                 "reachouts_by_source": monthly_reachouts_by_source,
                 "closed_deals": closed_month_total,
             },
+            "school_map": school_map,
         }
     )
 

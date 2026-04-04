@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Dict
 from urllib.parse import quote
 
-from ..database import get_connection, ensure_crm_tables, ensure_vendor_table
+from ..database import get_connection, ensure_crm_tables, ensure_institutions_table, ensure_vendor_table
 from ..utils.text_utils import clean_text, join_location
 from ..utils.workspace import workspace_id_for_user
 from .chapters import fetch_normalized_rows
@@ -379,3 +379,156 @@ def manufacturer_hot_chapters(user: dict, limit: int = 25) -> List[dict]:
 def manufacturer_hot_vendors(user: dict, limit: int = 25) -> List[dict]:
     dataset = manufacturer_dashboard_dataset(user, activity_limit=0)
     return dataset["hot_vendors"][: max(1, min(int(limit), 200))]
+
+
+def workspace_school_map_snapshot(conn, workspace_id: str) -> dict:
+    ensure_crm_tables(conn)
+    ensure_institutions_table(conn)
+    ws = clean_text(workspace_id)
+    if not ws:
+        return {"points": [], "stats": {"mapped": 0, "served": 0, "prospect": 0, "mixed": 0}}
+
+    chapters = fetch_normalized_rows()
+    chapter_by_id: Dict[str, dict] = {clean_text(row.get("id")): row for row in chapters if clean_text(row.get("id"))}
+
+    institution_rows = conn.execute(
+        """
+        SELECT id, location_name, city, state, latitude, longitude, control, institution_level
+        FROM institutions
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+          AND trim(coalesce(latitude, '')) <> ''
+          AND trim(coalesce(longitude, '')) <> ''
+        """
+    ).fetchall()
+    institution_by_id: Dict[str, dict] = {}
+    institution_by_name: Dict[str, dict] = {}
+    for row in institution_rows:
+        item = {k: row[k] for k in row.keys()}
+        try:
+            item["latitude"] = float(item["latitude"])
+            item["longitude"] = float(item["longitude"])
+        except (TypeError, ValueError):
+            continue
+        institution_by_id[str(item["id"])] = item
+        lookup_key = clean_text(item.get("location_name")).lower()
+        if lookup_key and lookup_key not in institution_by_name:
+            institution_by_name[lookup_key] = item
+
+    points_by_id: Dict[str, dict] = {}
+
+    def resolve_institution(row_type: str, row_name: str, chapter_id: str, connection: str):
+        inst = None
+        normalized_type = clean_text(row_type).lower()
+        if clean_text(connection).startswith("institution:"):
+            inst = institution_by_id.get(clean_text(connection).split(":", 1)[1])
+            if inst:
+                return inst
+        if normalized_type == "chapter" and chapter_id:
+            chapter = chapter_by_id.get(chapter_id, {})
+            school_name = clean_text(chapter.get("school"))
+            if school_name:
+                inst = institution_by_name.get(school_name.lower())
+        if inst:
+            return inst
+        name_key = clean_text(row_name).lower()
+        if name_key:
+            return institution_by_name.get(name_key)
+        return None
+
+    def upsert_point(inst: dict, bucket: str):
+        if not inst or bucket not in {"served", "prospect"}:
+            return
+        key = str(inst.get("id"))
+        point = points_by_id.setdefault(
+            key,
+            {
+                "institution_id": int(inst["id"]),
+                "institution_name": clean_text(inst.get("location_name")),
+                "city": clean_text(inst.get("city")),
+                "state": clean_text(inst.get("state")),
+                "latitude": float(inst["latitude"]),
+                "longitude": float(inst["longitude"]),
+                "control": clean_text(inst.get("control")),
+                "institution_level": clean_text(inst.get("institution_level")),
+                "served_count": 0,
+                "prospect_count": 0,
+                "has_served": False,
+                "has_prospect": False,
+            },
+        )
+        count_key = "served_count" if bucket == "served" else "prospect_count"
+        flag_key = "has_served" if bucket == "served" else "has_prospect"
+        point[count_key] = int(point.get(count_key) or 0) + 1
+        point[flag_key] = True
+
+    def bucket_for_status(value: str) -> str:
+        status = clean_text(value).lower()
+        if status in {"closed", "served"}:
+            return "served"
+        if status in {"", "dormant"}:
+            return ""
+        return "prospect"
+
+    crm_rows = conn.execute(
+        """
+        SELECT type, name, chapter_id, connection, status
+        FROM crm_contacts
+        WHERE workspace_id=?
+          AND lower(coalesce(type, '')) IN ('chapter', 'school', 'other')
+        ORDER BY id DESC
+        """,
+        (ws,),
+    ).fetchall()
+    for row in crm_rows:
+        bucket = bucket_for_status(row["status"])
+        if not bucket:
+            continue
+        inst = resolve_institution(
+            clean_text(row["type"]),
+            clean_text(row["name"]),
+            clean_text(row["chapter_id"]),
+            clean_text(row["connection"]),
+        )
+        upsert_point(inst, bucket)
+
+    order_rows = conn.execute(
+        """
+        SELECT school
+        FROM vendor_orders
+        WHERE workspace_id=?
+          AND trim(coalesce(school, ''))<>''
+        ORDER BY id DESC
+        """,
+        (ws,),
+    ).fetchall()
+    for row in order_rows:
+        school_name = clean_text(row["school"])
+        if not school_name:
+            continue
+        upsert_point(institution_by_name.get(school_name.lower()), "served")
+
+    points = []
+    stats = {"mapped": 0, "served": 0, "prospect": 0, "mixed": 0}
+    for point in points_by_id.values():
+        if point["has_served"] and point["has_prospect"]:
+            point["status"] = "mixed"
+            stats["mixed"] += 1
+        elif point["has_served"]:
+            point["status"] = "served"
+            stats["served"] += 1
+        elif point["has_prospect"]:
+            point["status"] = "prospect"
+            stats["prospect"] += 1
+        else:
+            continue
+        points.append(point)
+    stats["mapped"] = len(points)
+    points.sort(
+        key=lambda item: (
+            0 if item.get("status") == "mixed" else (1 if item.get("status") == "served" else 2),
+            -int(item.get("served_count") or 0),
+            -int(item.get("prospect_count") or 0),
+            item.get("institution_name", ""),
+        )
+    )
+    return {"points": points, "stats": stats}

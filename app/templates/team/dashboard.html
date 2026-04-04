@@ -2,6 +2,55 @@
 {% block title %}Team Dashboard{% endblock %}
 {% block page_title %}Team Dashboard{% endblock %}
 {% block page_subtitle %}Track team pipeline activity and closed deals{% endblock %}
+{% block extra_head %}
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <style>
+    .team-school-map-shell{
+      min-height: 34rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .team-school-map{
+      height: 27rem;
+      border-radius: 1.25rem;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.45);
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(239,247,255,.98));
+    }
+    .team-school-map .leaflet-control-zoom a{
+      color: #123d71;
+    }
+    .team-map-stat{
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: rgba(255,255,255,.72);
+      padding: .85rem .95rem;
+      text-align: center;
+    }
+    .team-map-legend-dot{
+      width: .8rem;
+      height: .8rem;
+      border-radius: 999px;
+      display: inline-flex;
+      flex: 0 0 auto;
+    }
+    .team-school-map .leaflet-popup-content-wrapper{
+      border-radius: 1rem;
+    }
+    .team-school-map .leaflet-popup-content{
+      margin: .9rem 1rem;
+      color: #123d71;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+    }
+  </style>
+{% endblock %}
 {% block content %}
 <div x-data="teamDashboard()" x-init="load()" class="space-y-4">
   <div class="panel p-4">
@@ -174,7 +223,75 @@
 </div>
 {% endblock %}
 
+{% block context_panel %}
+  <aside class="space-y-4 self-start">
+    <section class="panel p-4 team-school-map-shell">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <div class="text-xs uppercase tracking-[0.28em] text-slate-500">School Footprint</div>
+          <h3 class="mt-2 text-lg font-semibold text-slate-900">Served and prospect schools</h3>
+          <p class="mt-1 text-sm text-slate-500">
+            The right-side map shows where the team already has served relationships and where active school prospects still need attention.
+          </p>
+        </div>
+        <a href="/institutions/detail" class="btn-ghost whitespace-nowrap">Open Explorer</a>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 text-slate-900">
+        <div class="team-map-stat">
+          <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">Mapped</div>
+          <div id="team-school-map-count" class="mt-2 text-xl font-semibold">0</div>
+        </div>
+        <div class="team-map-stat">
+          <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">Served</div>
+          <div id="team-school-served-count" class="mt-2 text-xl font-semibold text-emerald-700">0</div>
+        </div>
+        <div class="team-map-stat">
+          <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">Prospects</div>
+          <div id="team-school-prospect-count" class="mt-2 text-xl font-semibold text-amber-700">0</div>
+        </div>
+        <div class="team-map-stat">
+          <div class="text-[11px] uppercase tracking-[0.22em] text-slate-500">Both</div>
+          <div id="team-school-mixed-count" class="mt-2 text-xl font-semibold text-blue-700">0</div>
+        </div>
+      </div>
+
+      <div id="team-school-map-shell" class="space-y-3 hidden">
+        <div id="team-school-map" class="team-school-map" aria-label="Team school footprint map"></div>
+        <div class="grid gap-2 text-xs text-slate-500">
+          <div class="flex items-center gap-2">
+            <span class="team-map-legend-dot" style="background:#0f9f7f;"></span>
+            <span>Served schools</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="team-map-legend-dot" style="background:#d97706;"></span>
+            <span>Active prospects</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="team-map-legend-dot" style="background:#2563eb;"></span>
+            <span>Schools with both served and open prospect activity</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="team-school-map-empty" class="team-school-map flex items-center justify-center bg-white/60 text-center">
+        <div class="max-w-xs space-y-2">
+          <div class="text-sm font-semibold text-slate-900">No mappable school activity yet</div>
+          <p class="text-sm text-slate-500">
+            Once chapter or school contacts are linked to campuses with coordinates, they will appear here.
+          </p>
+        </div>
+      </div>
+    </section>
+  </aside>
+{% endblock %}
+
 {% block extra_scripts %}
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""
+></script>
 <script>
 function teamDashboard(){
   return {
@@ -184,6 +301,7 @@ function teamDashboard(){
     totals: {total:0, closed:0, open:0},
     monthly: {reachouts_by_source:[], closed_deals:0},
     conversion: {contacted:0, replied:0, closed:0, rate:0},
+    schoolMap: {points:[], stats:{mapped:0, served:0, prospect:0, mixed:0}},
     currentRole: "member",
     canEditTargets: false,
     async load(){
@@ -197,12 +315,16 @@ function teamDashboard(){
       this.unattributed = out.unattributed || this.unattributed;
       this.monthly = out.monthly || this.monthly;
       this.conversion = out.conversion || this.conversion;
+      this.schoolMap = out.school_map || this.schoolMap;
       this.currentRole = (out.current_role || "member").toLowerCase();
       this.canEditTargets = ["manager","owner","admin"].includes(this.currentRole);
       const total = this.members.reduce((sum, m)=>sum + (m.total_contacts || 0), 0) + (this.unattributed.total_contacts || 0);
       const closed = this.members.reduce((sum, m)=>sum + (m.closed_contacts || 0), 0) + (this.unattributed.closed_contacts || 0);
       const open = this.members.reduce((sum, m)=>sum + (m.open_contacts || 0), 0) + (this.unattributed.open_contacts || 0);
       this.totals = {total, closed, open};
+      if(window.renderTeamSchoolMap){
+        window.renderTeamSchoolMap(this.schoolMap);
+      }
     },
     conversionLabel(){
       const rate = Number(this.conversion.rate || 0);
@@ -263,5 +385,124 @@ function teamDashboard(){
     },
   };
 }
+</script>
+<script>
+(() => {
+  let map = null;
+  let markers = null;
+  let resizeBound = false;
+
+  const ids = {
+    mapped: "team-school-map-count",
+    served: "team-school-served-count",
+    prospect: "team-school-prospect-count",
+    mixed: "team-school-mixed-count",
+    shell: "team-school-map-shell",
+    empty: "team-school-map-empty",
+    map: "team-school-map",
+  };
+
+  function setText(id, value){
+    const node = document.getElementById(id);
+    if(node) node.textContent = String(value ?? 0);
+  }
+
+  function colorForPoint(point){
+    if(point.status === "mixed") return "#2563eb";
+    if(point.status === "served") return "#0f9f7f";
+    return "#d97706";
+  }
+
+  window.renderTeamSchoolMap = function(summary){
+    const safeSummary = summary || {points: [], stats: {mapped: 0, served: 0, prospect: 0, mixed: 0}};
+    const points = Array.isArray(safeSummary.points) ? safeSummary.points : [];
+    const stats = safeSummary.stats || {};
+
+    setText(ids.mapped, stats.mapped || 0);
+    setText(ids.served, stats.served || 0);
+    setText(ids.prospect, stats.prospect || 0);
+    setText(ids.mixed, stats.mixed || 0);
+
+    const shell = document.getElementById(ids.shell);
+    const empty = document.getElementById(ids.empty);
+    const mapElement = document.getElementById(ids.map);
+    if(!shell || !empty || !mapElement) return;
+
+    if(!points.length || typeof L === "undefined"){
+      shell.classList.add("hidden");
+      empty.classList.remove("hidden");
+      return;
+    }
+
+    shell.classList.remove("hidden");
+    empty.classList.add("hidden");
+
+    if(!map){
+      map = L.map(mapElement, {
+        zoomControl: true,
+        scrollWheelZoom: false,
+        maxBounds: [[16, -170], [72, -52]],
+        maxBoundsViscosity: 1,
+      });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 18,
+        minZoom: 3,
+        noWrap: true,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(map);
+      markers = L.layerGroup().addTo(map);
+      if(!resizeBound){
+        resizeBound = true;
+        window.addEventListener("resize", () => map && map.invalidateSize());
+      }
+    }
+
+    markers.clearLayers();
+    const markerBounds = [];
+    points.forEach((point) => {
+      if(typeof point.latitude !== "number" || typeof point.longitude !== "number") return;
+      const location = [point.latitude, point.longitude];
+      markerBounds.push(location);
+      const marker = L.circleMarker(location, {
+        radius: point.status === "mixed" ? 10 : 8,
+        color: "#0f3566",
+        weight: 2,
+        fillColor: colorForPoint(point),
+        fillOpacity: 0.88,
+      }).addTo(markers);
+
+      marker.bindTooltip(point.institution_name || "School", {
+        direction: "top",
+        offset: [0, -8],
+        opacity: 0.96,
+      });
+
+      const statusLabel = point.status === "mixed" ? "Served + Prospect" : (point.status === "served" ? "Served" : "Prospect");
+      const popupHtml = `
+        <div class="space-y-2">
+          <div>
+            <div class="text-sm font-semibold text-slate-900">${point.institution_name || "School"}</div>
+            <div class="text-xs text-slate-500">${[point.city, point.state].filter(Boolean).join(", ")}</div>
+          </div>
+          <div class="text-xs text-slate-500">Status: ${statusLabel}</div>
+          <div class="text-xs text-slate-500">Served records: ${Number(point.served_count || 0)} | Prospect records: ${Number(point.prospect_count || 0)}</div>
+          <a class="text-xs font-semibold text-blue-700" href="/institutions/detail?institution_id=${point.institution_id}">Open institution detail</a>
+        </div>
+      `;
+      marker.bindPopup(popupHtml);
+      marker.on("click", () => {
+        window.location.href = `/institutions/detail?institution_id=${point.institution_id}`;
+      });
+    });
+
+    const defaultBounds = [[24.25, -125.5], [49.6, -66.5]];
+    if(markerBounds.length){
+      map.fitBounds(markerBounds, {padding: [28, 28], maxZoom: 6});
+    }else{
+      map.fitBounds(defaultBounds);
+    }
+    setTimeout(() => map && map.invalidateSize(), 140);
+  };
+})();
 </script>
 {% endblock %}
