@@ -90,6 +90,8 @@ class AppTests(unittest.TestCase):
         self.assertIn('"/login"', body)
         self.assertIn('"/signup"', body)
         self.assertIn('"/ops/track"', body)
+        self.assertIn('"sign up": window.opsHubLandingLinks.signup', body)
+        self.assertIn('document.addEventListener("click"', body)
 
     def test_root_landing_ctas_point_logged_in_user_to_dashboard(self):
         self._login("demo", "demo123")

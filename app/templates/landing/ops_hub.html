@@ -20,7 +20,9 @@
     (function () {
       const labelRoutes = {
         login: window.opsHubLandingLinks.login,
+        "log in": window.opsHubLandingLinks.login,
         signup: window.opsHubLandingLinks.signup,
+        "sign up": window.opsHubLandingLinks.signup,
         "get started": window.opsHubLandingLinks.get_started,
         "start for free": window.opsHubLandingLinks.start_free,
       };
@@ -29,36 +31,73 @@
         return (text || "").replace(/\s+/g, " ").trim().toLowerCase();
       }
 
+      function resolveLandingTarget(startNode) {
+        if (!(startNode instanceof Element)) {
+          return null;
+        }
+        const button = startNode.closest("#root button");
+        if (button) {
+          const target = labelRoutes[normalizeLabel(button.textContent)];
+          if (target) {
+            return { node: button, target: target };
+          }
+        }
+        const span = startNode.closest("#root span");
+        if (span && normalizeLabel(span.textContent) === "guest order tracking") {
+          return { node: span.closest("div") || span, target: window.opsHubLandingLinks.track };
+        }
+        return null;
+      }
+
       function attachButtonRoutes() {
         document.querySelectorAll("#root button").forEach((button) => {
-          const label = normalizeLabel(button.textContent);
-          const target = labelRoutes[label];
-          if (!target || button.dataset.opsHubLinked === "1") {
+          const target = labelRoutes[normalizeLabel(button.textContent)];
+          if (!target) {
             return;
           }
           button.dataset.opsHubLinked = "1";
-          button.addEventListener("click", () => {
-            window.location.assign(target);
-          });
+          button.dataset.opsHubTarget = target;
+          button.style.cursor = "pointer";
         });
 
         document.querySelectorAll("#root span").forEach((node) => {
-          const label = normalizeLabel(node.textContent);
-          if (label !== "guest order tracking") {
+          if (normalizeLabel(node.textContent) !== "guest order tracking") {
             return;
           }
-          const target = window.opsHubLandingLinks.track;
-          const container = node.closest("div");
-          if (!container || container.dataset.opsHubLinked === "1") {
-            return;
-          }
+          const container = node.closest("div") || node;
           container.dataset.opsHubLinked = "1";
+          container.dataset.opsHubTarget = window.opsHubLandingLinks.track;
           container.style.cursor = "pointer";
-          container.addEventListener("click", () => {
-            window.location.assign(target);
-          });
+          container.setAttribute("role", "link");
+          if (!container.hasAttribute("tabindex")) {
+            container.setAttribute("tabindex", "0");
+          }
         });
       }
+
+      document.addEventListener("click", (event) => {
+        const match = resolveLandingTarget(event.target);
+        if (!match || !match.target) {
+          return;
+        }
+        event.preventDefault();
+        window.location.assign(match.target);
+      }, true);
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        const match = resolveLandingTarget(event.target);
+        if (!match || !match.target || !(match.node instanceof HTMLElement)) {
+          return;
+        }
+        if (match.node.tagName.toLowerCase() === "button" && event.key === "Enter") {
+          return;
+        }
+        event.preventDefault();
+        window.location.assign(match.target);
+      }, true);
 
       const root = document.getElementById("root");
       if (root) {
