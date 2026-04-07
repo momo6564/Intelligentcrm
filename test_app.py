@@ -3,10 +3,15 @@ import unittest
 import uuid
 from datetime import date, timedelta
 
+import app.database as database_module
+import app.services.chapters as chapter_service_module
 from app import create_app
-from app.config import Config
+from app.config import Config, TestingConfig
 from app.database import get_connection, ensure_crm_tables, ensure_institutions_table, ensure_chapters_table, ensure_vendor_table
 from app.order_ops import ensure_ops_tables
+from app.routes import api as api_routes
+from app.routes import chapters as chapter_routes
+from app.routes import institutions as institution_routes
 from app.routes import main as main_routes
 from app.services.chapters import fetch_normalized_rows
 
@@ -16,17 +21,22 @@ class AppTests(unittest.TestCase):
     def setUpClass(cls):
         cls._orig_db_path = Config.DB_PATH
         cls._orig_vendor_csv = Config.VENDOR_CSV_PATH
+        cls._orig_testing_db_path = TestingConfig.DB_PATH
+        cls._orig_testing_vendor_csv = TestingConfig.VENDOR_CSV_PATH
         cls._tmp_dir = os.path.join(os.getcwd(), ".test_tmp")
         os.makedirs(cls._tmp_dir, exist_ok=True)
         Config.DB_PATH = os.path.join(cls._tmp_dir, "test.db")
         Config.VENDOR_CSV_PATH = os.path.join(cls._tmp_dir, "vendors.csv")
-        cls.app = create_app()
-        cls.app.config["TESTING"] = True
+        TestingConfig.DB_PATH = Config.DB_PATH
+        TestingConfig.VENDOR_CSV_PATH = Config.VENDOR_CSV_PATH
+        cls.app = create_app(TestingConfig)
 
     @classmethod
     def tearDownClass(cls):
         Config.DB_PATH = cls._orig_db_path
         Config.VENDOR_CSV_PATH = cls._orig_vendor_csv
+        TestingConfig.DB_PATH = cls._orig_testing_db_path
+        TestingConfig.VENDOR_CSV_PATH = cls._orig_testing_vendor_csv
         try:
             if os.path.exists(os.path.join(cls._tmp_dir, "test.db")):
                 os.remove(os.path.join(cls._tmp_dir, "test.db"))
@@ -34,14 +44,25 @@ class AppTests(unittest.TestCase):
             pass
 
     def setUp(self):
+        with self.app.app_context():
+            database_module.close_connection()
         if os.path.exists(Config.DB_PATH):
             os.remove(Config.DB_PATH)
         self.client = self.app.test_client()
+        cache = self.app.extensions.get("performance_cache")
+        if cache is not None and hasattr(cache, "clear"):
+            cache.clear()
+        chapter_service_module._UNIVERSE_CACHE["value"] = None
+        chapter_service_module._UNIVERSE_CACHE["expires_at"] = 0.0
         with self.app.app_context():
             conn = get_connection()
             ensure_crm_tables(conn)
             ensure_ops_tables(conn)
             conn.commit()
+
+    def tearDown(self):
+        with self.app.app_context():
+            database_module.close_connection()
 
     def _signup(self, username: str, manufacturer_name: str, password: str = "pass123", account_type: str = "manufacturer", expected_path: str = "/dashboard") -> None:
         resp = self.client.post(
@@ -101,20 +122,32 @@ class AppTests(unittest.TestCase):
         self.assertIn('"/dashboard"', body)
 
     def test_dashboard_page_skips_eager_institutions_bootstrap(self):
+        with self.app.app_context():
+            conn = get_connection()
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chapters_raw (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_file TEXT,
+                    row_number TEXT
+                )
+                """
+            )
+            conn.commit()
         self._login("demo", "demo123")
-        original_ensure = main_routes.ensure_institutions_table
+        original_ensure = database_module.ensure_institutions_table
 
         def fail_if_called(conn):
             raise AssertionError("dashboard should not eagerly bootstrap institutions")
 
-        main_routes.ensure_institutions_table = fail_if_called
+        database_module.ensure_institutions_table = fail_if_called
         try:
             resp = self.client.get("/dashboard")
             self.assertEqual(resp.status_code, 200)
             body = resp.get_data(as_text=True)
             self.assertIn("Load Served Map", body)
         finally:
-            main_routes.ensure_institutions_table = original_ensure
+            database_module.ensure_institutions_table = original_ensure
 
     def test_dashboard_served_map_api_bootstraps_institutions_on_demand(self):
         self._login("demo", "demo123")
@@ -136,6 +169,135 @@ class AppTests(unittest.TestCase):
             self.assertGreaterEqual(calls["count"], 1)
         finally:
             main_routes.ensure_institutions_table = original_ensure
+
+    def test_api_chapters_skips_eager_chapter_bootstrap(self):
+        with self.app.app_context():
+            conn = get_connection()
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chapters_raw (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_file TEXT,
+                    row_number TEXT
+                )
+                """
+            )
+            conn.commit()
+        self._login("demo", "demo123")
+        original_ensure = api_routes.ensure_chapters_table
+
+        def require_lightweight(conn, bootstrap_related=True):
+            if bootstrap_related:
+                raise AssertionError("api/chapters should use lightweight chapter bootstrap")
+            return original_ensure(conn, bootstrap_related=bootstrap_related)
+
+        api_routes.ensure_chapters_table = require_lightweight
+        try:
+            resp = self.client.get("/api/chapters?page=1&limit=50")
+            self.assertEqual(resp.status_code, 200)
+            payload = resp.get_json()
+            self.assertTrue(payload.get("ok"))
+        finally:
+            api_routes.ensure_chapters_table = original_ensure
+
+    def test_institution_detail_skips_eager_chapter_bootstrap(self):
+        with self.app.app_context():
+            conn = get_connection()
+            ensure_institutions_table(conn)
+            conn.execute(
+                """
+                INSERT INTO institutions (location_name, city, state)
+                VALUES (?, ?, ?)
+                """,
+                ("Fast Institution", "Austin", "TX"),
+            )
+            conn.commit()
+            institution_id = int(conn.execute("SELECT MAX(id) FROM institutions").fetchone()[0])
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chapters_raw (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_file TEXT,
+                    row_number TEXT
+                )
+                """
+            )
+            conn.commit()
+        self._login("demo", "demo123")
+        original_ensure = institution_routes.ensure_chapters_table
+
+        def require_lightweight(conn, bootstrap_related=True):
+            if bootstrap_related:
+                raise AssertionError("institution detail should use lightweight chapter bootstrap")
+            return original_ensure(conn, bootstrap_related=bootstrap_related)
+
+        institution_routes.ensure_chapters_table = require_lightweight
+        try:
+            resp = self.client.get(f"/institutions/detail?institution_id={institution_id}")
+            self.assertEqual(resp.status_code, 200)
+        finally:
+            institution_routes.ensure_chapters_table = original_ensure
+
+    def test_chapter_detail_page_skips_eager_chapter_bootstrap(self):
+        with self.app.app_context():
+            conn = get_connection()
+            ensure_vendor_table(conn)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chapters (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chapter_uid TEXT UNIQUE,
+                    institution_id INTEGER,
+                    chapter_name TEXT,
+                    organization TEXT,
+                    school TEXT,
+                    city TEXT,
+                    state TEXT,
+                    instagram TEXT,
+                    chapter_id TEXT,
+                    status TEXT,
+                    founded_year INTEGER,
+                    notes TEXT,
+                    org_code TEXT,
+                    entity_type TEXT,
+                    scope TEXT,
+                    source_file TEXT,
+                    row_number TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO chapters (
+                    chapter_uid, chapter_name, organization, school, city, state, status, source_file, row_number
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("test-source::1", "Alpha Eta", "Delta Sigma Theta", "Fast Campus", "Austin", "TX", "Active", "test-source", "1"),
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chapters_raw (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_file TEXT,
+                    row_number TEXT
+                )
+                """
+            )
+            conn.commit()
+        self._login("demo", "demo123")
+        original_ensure = chapter_routes.ensure_chapters_table
+
+        def require_lightweight(conn, bootstrap_related=True):
+            if bootstrap_related:
+                raise AssertionError("chapter detail should use lightweight chapter bootstrap")
+            return original_ensure(conn, bootstrap_related=bootstrap_related)
+
+        chapter_routes.ensure_chapters_table = require_lightweight
+        try:
+            resp = self.client.get("/chapters/test-source::1")
+            self.assertEqual(resp.status_code, 200)
+        finally:
+            chapter_routes.ensure_chapters_table = original_ensure
 
     def test_signup_page_shows_account_type_choices(self):
         anon = self.app.test_client()

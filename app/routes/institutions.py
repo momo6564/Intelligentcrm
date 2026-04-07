@@ -42,7 +42,7 @@ def institution_detail_page():
         conn = get_connection()
         ensure_crm_tables(conn)
         ensure_institutions_table(conn)
-        ensure_chapters_table(conn)
+        ensure_chapters_table(conn, bootstrap_related=False)
         if inst_id_raw.isdigit():
             user = get_session_user()
             workspace_id = workspace_id_for_user(user)
@@ -69,6 +69,6 @@ def institution_drawer_partial():
         return render_template("components/institution_drawer.html", institution={}, me=get_session_user())
     conn = get_connection()
     ensure_institutions_table(conn)
-    ensure_chapters_table(conn)
+    ensure_chapters_table(conn, bootstrap_related=False)
     institution, _chapters, _my_status = fetch_institution_profile(conn, int(inst_id_raw))
     return render_template("components/institution_drawer.html", institution=institution, me=get_session_user())

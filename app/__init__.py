@@ -7,14 +7,47 @@ GOOGLE_API_BASE_URL = "https://openidconnect.googleapis.com/v1/"
 GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 GOOGLE_JWKS_URI = "https://www.googleapis.com/oauth2/v3/certs"
 
+
+def _warm_reference_runtime(app) -> None:
+    if not app.config.get("EAGER_REFERENCE_BOOTSTRAP"):
+        return
+
+    try:
+        from .database import (
+            get_connection,
+            ensure_crm_tables,
+            ensure_vendor_table,
+            ensure_institutions_table,
+            ensure_chapters_table,
+        )
+        from .services.chapters import fetch_normalized_rows
+
+        with app.app_context():
+            conn = get_connection()
+            ensure_crm_tables(conn)
+            ensure_vendor_table(conn)
+            if app.config.get("WARM_INSTITUTIONS_CACHE"):
+                ensure_institutions_table(conn)
+            ensure_chapters_table(conn, bootstrap_related=False)
+            if app.config.get("WARM_CHAPTER_REFERENCE_CACHE"):
+                fetch_normalized_rows(force_refresh=True)
+        app.logger.info(
+            "Reference data warmed with %s cache backend.",
+            app.extensions.get("performance_cache_backend") or "unknown",
+        )
+    except Exception:
+        app.logger.exception("Reference data warm-up failed during app startup.")
+
+
 def create_app(config_class=None):
-    from .config import Config
+    from .cache import init_cache
+    from .config import resolve_config_class, sync_legacy_config
 
     app = Flask(__name__)
     if config_class is None:
-        app.config.from_object(Config)
-    else:
-        app.config.from_object(config_class)
+        config_class = resolve_config_class()
+    sync_legacy_config(config_class)
+    app.config.from_object(config_class)
     if (
         not app.config.get("TESTING")
         and os.environ.get("FLASK_ENV", "").lower() == "production"
@@ -34,6 +67,8 @@ def create_app(config_class=None):
             legacy_db_path,
             active_db_path,
         )
+
+    init_cache(app)
 
     # Register blueprints (to be implemented)
     from .routes import main, auth, api, chapters, vendors, institutions, team, admin, ops, brand
@@ -75,5 +110,7 @@ def create_app(config_class=None):
 
     from .database import close_connection
     app.teardown_appcontext(close_connection)
+
+    _warm_reference_runtime(app)
 
     return app

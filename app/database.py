@@ -1767,7 +1767,7 @@ def ensure_institutions_table(conn: sqlite3.Connection) -> None:
 
     conn.commit()
 
-def ensure_chapters_table(conn: sqlite3.Connection) -> None:
+def ensure_chapters_table(conn: sqlite3.Connection, bootstrap_related: bool = True) -> None:
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS app_meta (
@@ -1824,8 +1824,12 @@ def ensure_chapters_table(conn: sqlite3.Connection) -> None:
     prev_count = int(prev_count_row[0]) if prev_count_row and str(prev_count_row[0]).isdigit() else -1
     existing_count = conn.execute("SELECT COUNT(*) FROM chapters").fetchone()[0]
     if existing_count > 0 and raw_count == prev_count:
-        _refresh_chapter_institution_links(conn)
-        conn.commit()
+        if bootstrap_related:
+            _refresh_chapter_institution_links(conn)
+            conn.commit()
+        return
+
+    if not bootstrap_related:
         return
 
     ensure_institutions_table(conn)

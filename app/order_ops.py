@@ -1923,7 +1923,7 @@ def internal_workspace_payload(conn, workspace_id: str) -> dict:
         "sample_requests": [_order_row_to_dict(row) for row in sample_requests],
         "kpis": {
             "clients": len(clients),
-            "sample_requests_open": sum(1 for row in sample_requests if clean_text(row.get("status")) != "closed"),
+            "sample_requests_open": sum(1 for row in sample_requests if clean_text(row["status"]) != "closed"),
         },
     }
 

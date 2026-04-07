@@ -40,7 +40,7 @@ def chapter_detail_page(chapter_id: str):
     chapter_id_clean = clean_text(chapter.get("id"))
     conn = get_connection()
     ensure_crm_tables(conn)
-    ensure_chapters_table(conn)
+    ensure_chapters_table(conn, bootstrap_related=False)
     ensure_institutions_table(conn)
     crm_row = conn.execute(
         """

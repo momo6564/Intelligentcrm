@@ -132,7 +132,7 @@ def _served_map_payload(conn, workspace_id: str) -> dict:
         }
 
     ensure_crm_tables(conn)
-    ensure_chapters_table(conn)
+    ensure_chapters_table(conn, bootstrap_related=False)
     ensure_institutions_table(conn)
 
     schools_served = _served_school_rows(conn, ws)
@@ -379,7 +379,7 @@ def dashboard_page():
     workspace_id = workspace_id_for_user(user)
     conn = get_connection()
     ensure_crm_tables(conn)
-    ensure_chapters_table(conn)
+    ensure_chapters_table(conn, bootstrap_related=False)
     ensure_vendor_table(conn)
     chapter_contact_rows = conn.execute(
         """

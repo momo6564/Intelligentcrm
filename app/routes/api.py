@@ -1347,7 +1347,7 @@ def api_update_chapter_instagram():
 
     conn = get_connection()
     ensure_crm_tables(conn)
-    ensure_chapters_table(conn)
+    ensure_chapters_table(conn, bootstrap_related=False)
 
     crm_row = conn.execute(
         "SELECT 1 FROM crm_contacts WHERE workspace_id=? AND type='chapter' AND chapter_id=? LIMIT 1",
@@ -2324,7 +2324,7 @@ def api_chapters():
         workspace_id = workspace_id_for_user(user)
         conn = get_connection()
         ensure_crm_tables(conn)
-        ensure_chapters_table(conn)
+        ensure_chapters_table(conn, bootstrap_related=False)
 
         page_raw = clean_text(request.args.get("page"))
         limit_raw = clean_text(request.args.get("limit"))
@@ -2719,7 +2719,7 @@ def api_institution_detail(institution_id: int):
     conn = get_connection()
     ensure_crm_tables(conn)
     ensure_institutions_table(conn)
-    ensure_chapters_table(conn)
+    ensure_chapters_table(conn, bootstrap_related=False)
 
     user = get_session_user()
     workspace_id = workspace_id_for_user(user)

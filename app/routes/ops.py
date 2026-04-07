@@ -135,7 +135,7 @@ def api_ops_internal():
         return _forbidden()
     workspace_id = workspace_id_for_user(user)
     conn = get_ops_conn()
-    return jsonify({"ok": True, **internal_workspace_payload(conn, workspace_id, int(user.get("id") or 0))})
+    return jsonify({"ok": True, **internal_workspace_payload(conn, workspace_id)})
 
 
 @bp.route("/api/ops/workflow-template", methods=["GET", "POST"])
