@@ -4,7 +4,6 @@ import json
 import uuid
 from datetime import datetime, date
 from flask import Blueprint, request, jsonify, redirect, url_for, Response
-from urllib.parse import quote
 from werkzeug.utils import secure_filename
 
 from ..auth import login_required, get_session_user
@@ -2134,38 +2133,6 @@ def api_m_crm_calendar():
     ).fetchall()
     return jsonify({"ok": True, "events": [{k: row[k] for k in row.keys()} for row in rows]})
 
-@bp.route("/api/m/research", methods=["POST"])
-@login_required()
-def api_m_research():
-    user = get_session_user()
-    workspace_id = workspace_id_for_user(user)
-    payload = request.get_json(silent=True) or {}
-    name = clean_text(payload.get("name"))
-    kind = clean_text(payload.get("type")) or "entity"
-    if not name:
-        return jsonify({"ok": False, "error": "name is required"}), 400
-    qbase = quote(name)
-    links = {
-        "website": f"https://www.google.com/search?q={qbase}+official+website",
-        "linkedin": f"https://www.google.com/search?q={qbase}+linkedin",
-        "instagram": f"https://www.google.com/search?q={qbase}+instagram",
-        "email": f"https://www.google.com/search?q={qbase}+contact+email",
-    }
-    conn = get_connection()
-    ensure_crm_tables(conn)
-    log_activity(
-        conn,
-        int(user.get("id") or 0),
-        "researched_lead",
-        kind,
-        name,
-        "Generated research links",
-        workspace_id=workspace_id,
-    )
-    conn.commit()
-    return jsonify({"ok": True, "summary": f"Research links generated for {name}", "links": links})
-
-
 @bp.route("/api/research-prompts", methods=["GET", "POST"])
 @login_required()
 def api_research_prompts():
@@ -2184,7 +2151,7 @@ def api_research_prompts():
                 "category": category,
                 "max_prompts": MAX_RESEARCH_PROMPTS,
                 "placeholders": research_placeholder_hints(category),
-                "prompts": research_prompt_slots_for_user(conn, user, category),
+                "prompts": research_prompt_slots_for_user(conn, user, category, workspace_id=workspace_id),
             }
         )
 
@@ -2193,8 +2160,8 @@ def api_research_prompts():
     if not category:
         return jsonify({"ok": False, "error": "Valid category is required"}), 400
     if payload.get("reset_defaults"):
-        prompts = reset_research_prompt_slots(conn, user, category)
-        return jsonify({"ok": True, "category": category, "prompts": prompts})
+        prompts = reset_research_prompt_slots(conn, user, category, workspace_id=workspace_id)
+        return jsonify({"ok": True, "category": category, "max_prompts": MAX_RESEARCH_PROMPTS, "prompts": prompts})
     prompts_raw = payload.get("prompts")
     if not isinstance(prompts_raw, list):
         return jsonify({"ok": False, "error": "prompts must be a list"}), 400
@@ -2212,12 +2179,7 @@ def api_research_prompts():
         workspace_id=workspace_id,
     )
     conn.commit()
-    return jsonify({"ok": True, "category": category, "prompts": prompts})
-
-@bp.route("/agent/research", methods=["POST"])
-@login_required()
-def api_alias_agent_research():
-    return api_m_research()
+    return jsonify({"ok": True, "category": category, "max_prompts": MAX_RESEARCH_PROMPTS, "prompts": prompts})
 
 @bp.route("/api/m/messages/send", methods=["POST"])
 @login_required()

@@ -92,33 +92,15 @@ def _defaults_for_category(category: str) -> list[dict]:
     return [dict(item) for item in RESEARCH_PROMPT_DEFAULTS.get(normalized, [])]
 
 
-def research_prompt_slots_for_user(conn, user: dict, category: str) -> list[dict]:
-    normalized = normalize_research_category(category)
-    user_id = int((user or {}).get("id") or 0)
-    if not normalized or user_id <= 0:
-        return [{"slot_index": idx, "label": "", "prompt_text": ""} for idx in range(1, MAX_RESEARCH_PROMPTS + 1)]
-    rows = conn.execute(
-        """
-        SELECT slot_index, label, prompt_text
-        FROM user_research_prompts
-        WHERE user_id=? AND category=?
-        ORDER BY slot_index ASC
-        """,
-        (user_id, normalized),
-    ).fetchall()
-    slots = [{"slot_index": idx, "label": "", "prompt_text": ""} for idx in range(1, MAX_RESEARCH_PROMPTS + 1)]
-    if rows:
-        for row in rows:
-            slot_index = int(row["slot_index"] or 0)
-            if 1 <= slot_index <= MAX_RESEARCH_PROMPTS:
-                slots[slot_index - 1] = {
-                    "slot_index": slot_index,
-                    "label": clean_text(row["label"]),
-                    "prompt_text": clean_text(row["prompt_text"]),
-                }
-        return slots
-    defaults = _defaults_for_category(normalized)
-    for index, item in enumerate(defaults, start=1):
+def _blank_slots() -> list[dict]:
+    return [{"slot_index": idx, "label": "", "prompt_text": ""} for idx in range(1, MAX_RESEARCH_PROMPTS + 1)]
+
+
+def _default_slots_for_category(category: str) -> list[dict]:
+    slots = _blank_slots()
+    for index, item in enumerate(_defaults_for_category(category), start=1):
+        if index > MAX_RESEARCH_PROMPTS:
+            break
         slots[index - 1] = {
             "slot_index": index,
             "label": clean_text(item.get("label")),
@@ -127,17 +109,52 @@ def research_prompt_slots_for_user(conn, user: dict, category: str) -> list[dict
     return slots
 
 
+def _normalized_workspace_id(user: dict, workspace_id: str = "") -> str:
+    explicit = clean_text(workspace_id)
+    if explicit:
+        return explicit
+    return clean_text((user or {}).get("workspace_id"))
+
+
+def research_prompt_slots_for_user(conn, user: dict, category: str, workspace_id: str = "") -> list[dict]:
+    normalized = normalize_research_category(category)
+    user_id = int((user or {}).get("id") or 0)
+    workspace = _normalized_workspace_id(user, workspace_id)
+    if not normalized or user_id <= 0:
+        return _default_slots_for_category(normalized) if normalized else _blank_slots()
+    rows = conn.execute(
+        """
+        SELECT slot_index, label, prompt_text
+        FROM user_research_prompts
+        WHERE user_id=? AND workspace_id=? AND category=?
+        ORDER BY slot_index ASC
+        """,
+        (user_id, workspace, normalized),
+    ).fetchall()
+    slots = _default_slots_for_category(normalized)
+    for row in rows:
+        slot_index = int(row["slot_index"] or 0)
+        if 1 <= slot_index <= MAX_RESEARCH_PROMPTS:
+            slots[slot_index - 1] = {
+                "slot_index": slot_index,
+                "label": clean_text(row["label"]),
+                "prompt_text": clean_text(row["prompt_text"]),
+            }
+    return slots
+
+
 def save_research_prompt_slots(conn, user: dict, category: str, prompts: list[dict], workspace_id: str = "") -> list[dict]:
     normalized = normalize_research_category(category)
     user_id = int((user or {}).get("id") or 0)
+    workspace = _normalized_workspace_id(user, workspace_id)
     if not normalized:
         raise ValueError("Unsupported category")
     if user_id <= 0:
         raise ValueError("User is required")
     cleaned_prompts = list(prompts or [])[:MAX_RESEARCH_PROMPTS]
     conn.execute(
-        "DELETE FROM user_research_prompts WHERE user_id=? AND category=?",
-        (user_id, normalized),
+        "DELETE FROM user_research_prompts WHERE user_id=? AND workspace_id=? AND category=?",
+        (user_id, workspace, normalized),
     )
     for index in range(1, MAX_RESEARCH_PROMPTS + 1):
         item = cleaned_prompts[index - 1] if index - 1 < len(cleaned_prompts) else {}
@@ -150,35 +167,60 @@ def save_research_prompt_slots(conn, user: dict, category: str, prompts: list[di
             INSERT INTO user_research_prompts(user_id, workspace_id, category, slot_index, label, prompt_text)
             VALUES(?, ?, ?, ?, ?, ?)
             """,
-            (user_id, clean_text(workspace_id), normalized, index, label[:80], prompt_text[:1200]),
+            (user_id, workspace, normalized, index, label[:80], prompt_text[:1200]),
         )
     conn.commit()
-    return research_prompt_slots_for_user(conn, user, normalized)
+    return research_prompt_slots_for_user(conn, user, normalized, workspace_id=workspace)
 
 
-def reset_research_prompt_slots(conn, user: dict, category: str) -> list[dict]:
+def reset_research_prompt_slots(conn, user: dict, category: str, workspace_id: str = "") -> list[dict]:
     normalized = normalize_research_category(category)
     user_id = int((user or {}).get("id") or 0)
+    workspace = _normalized_workspace_id(user, workspace_id)
     if normalized and user_id > 0:
         conn.execute(
-            "DELETE FROM user_research_prompts WHERE user_id=? AND category=?",
-            (user_id, normalized),
+            "DELETE FROM user_research_prompts WHERE user_id=? AND workspace_id=? AND category=?",
+            (user_id, workspace, normalized),
         )
         conn.commit()
-    return research_prompt_slots_for_user(conn, user, normalized)
+    return research_prompt_slots_for_user(conn, user, normalized, workspace_id=workspace)
 
 
 _TOKEN_RE = re.compile(r"\{([a-z0-9_]+)\}", re.I)
+_FRIENDLY_TOKEN_RE = re.compile(r"<<\s*([^>]+?)\s*>>", re.I)
+_TOKEN_ALIASES = {
+    "university": "institution_name",
+    "university_name": "institution_name",
+    "college": "institution_name",
+    "college_name": "institution_name",
+    "institution": "institution_name",
+    "vendor": "vendor_name",
+    "company": "vendor_name",
+    "company_name": "vendor_name",
+    "chapter": "chapter_name",
+    "organization_name": "organization",
+    "org": "organization",
+    "org_name": "organization",
+    "school_name": "school",
+}
+
+
+def _normalize_prompt_token(token: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", clean_text(token).lower()).strip("_")
+    return _TOKEN_ALIASES.get(normalized, normalized)
 
 
 def render_research_prompt(prompt_text: str, entity_context: dict) -> str:
-    context = {clean_text(key).lower(): clean_text(value) for key, value in (entity_context or {}).items()}
+    context = {}
+    for key, value in (entity_context or {}).items():
+        context[_normalize_prompt_token(key)] = clean_text(value)
 
     def replace_token(match):
-        token = clean_text(match.group(1)).lower()
+        token = _normalize_prompt_token(match.group(1))
         return context.get(token, "")
 
     rendered = _TOKEN_RE.sub(replace_token, clean_text(prompt_text))
+    rendered = _FRIENDLY_TOKEN_RE.sub(replace_token, rendered)
     rendered = re.sub(r"\s+", " ", rendered).strip()
     return rendered
 

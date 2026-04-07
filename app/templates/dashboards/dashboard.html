@@ -263,7 +263,7 @@
           <div class="text-xs uppercase tracking-[0.28em] text-slate-500">Served Map</div>
           <h3 class="mt-2 text-lg font-semibold text-slate-900">Institutions with usable coordinates</h3>
           <p class="mt-1 text-sm text-slate-500">
-            The dashboard now skips the heavy institutions bootstrap on first paint. Load the map only when you want the campus view.
+            The dashboard keeps the fast server path, then renders the served campus map automatically on desktop.
           </p>
         </div>
         <a href="/institutions/detail" class="btn-ghost whitespace-nowrap">Open Explorer</a>
@@ -286,11 +286,10 @@
 
       <div class="dashboard-map-preview">
         <div class="dashboard-map-preview-copy space-y-3">
-          <div class="text-sm font-semibold">Map kept on standby</div>
+          <div class="text-sm font-semibold">Preparing served campus map</div>
           <p class="text-sm text-slate-500">
-            Open it when you need the campus footprint. Until then, the dashboard stays on the fast path.
+            Desktop loads it automatically once the dashboard shell is ready.
           </p>
-          <button type="button" class="btn-primary px-4 py-2 text-sm" data-load-served-map>Load Served Map</button>
         </div>
       </div>
       <div class="dashboard-map-loading">Loading institutions map…</div>
@@ -319,7 +318,6 @@
       if (!panel) return;
 
       const mapUrl = panel.getAttribute('data-map-url');
-      const loadButton = panel.querySelector('[data-load-served-map]');
       const mapElement = document.getElementById('dashboard-served-map');
       const statEls = {
         mapped: panel.querySelector('[data-map-stat="mapped"]'),
@@ -330,10 +328,6 @@
 
       const setBusy = (busy) => {
         panel.setAttribute('aria-busy', busy ? 'true' : 'false');
-        if (loadButton) {
-          loadButton.disabled = !!busy;
-          loadButton.textContent = busy ? 'Loading map…' : 'Load Served Map';
-        }
       };
 
       const loadLeafletCss = () => {
@@ -483,9 +477,7 @@
         }
       };
 
-      if (loadButton) {
-        loadButton.addEventListener('click', loadMap);
-      }
+      loadMap();
     })();
   </script>
 {% endblock %}

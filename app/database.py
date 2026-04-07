@@ -18,7 +18,7 @@ from .utils.data_parse import (
     parse_location,
 )
 
-CRM_SCHEMA_VERSION = 1
+CRM_SCHEMA_VERSION = 2
 
 def get_connection() -> sqlite3.Connection:
     if 'db' not in g:
@@ -385,14 +385,14 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS user_research_prompts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            workspace_id TEXT,
+            workspace_id TEXT NOT NULL DEFAULT '',
             category TEXT NOT NULL,
             slot_index INTEGER NOT NULL,
             label TEXT NOT NULL,
             prompt_text TEXT NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, category, slot_index)
+            UNIQUE(user_id, workspace_id, category, slot_index)
         )
         """
     )
@@ -544,6 +544,59 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
             ),
         )
 
+    if current_version < 2:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_research_prompts_workspace_scoped (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                workspace_id TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL,
+                slot_index INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                prompt_text TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, workspace_id, category, slot_index)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO user_research_prompts_workspace_scoped(
+                user_id,
+                workspace_id,
+                category,
+                slot_index,
+                label,
+                prompt_text,
+                created_at,
+                updated_at
+            )
+            SELECT
+                urp.user_id,
+                coalesce(
+                    nullif(trim(urp.workspace_id), ''),
+                    (
+                        SELECT nullif(trim(u.workspace_id), '')
+                        FROM users u
+                        WHERE u.id=urp.user_id
+                    ),
+                    ''
+                ) AS workspace_id,
+                urp.category,
+                urp.slot_index,
+                urp.label,
+                urp.prompt_text,
+                coalesce(urp.created_at, CURRENT_TIMESTAMP),
+                coalesce(urp.updated_at, urp.created_at, CURRENT_TIMESTAMP)
+            FROM user_research_prompts urp
+            ORDER BY coalesce(urp.updated_at, urp.created_at, CURRENT_TIMESTAMP) ASC, urp.id ASC
+            """
+        )
+        conn.execute("DROP TABLE user_research_prompts")
+        conn.execute("ALTER TABLE user_research_prompts_workspace_scoped RENAME TO user_research_prompts")
+
     # Backfill workspace on activity rows keyed by user_id where possible.
     if "workspace_id" in activities_columns:
         conn.execute(
@@ -620,7 +673,7 @@ def ensure_crm_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_activities_workspace_contact ON crm_activities(workspace_id, crm_contact_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_activities_workspace_action ON crm_activities(workspace_id, action, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_contact_tags_workspace_contact ON crm_contact_tags(workspace_id, crm_contact_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_research_prompts_user_category ON user_research_prompts(user_id, category)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_research_prompts_user_workspace_category ON user_research_prompts(user_id, workspace_id, category)")
     conn.execute(f"PRAGMA user_version = {CRM_SCHEMA_VERSION}")
     conn.commit()
 

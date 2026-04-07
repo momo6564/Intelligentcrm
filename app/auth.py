@@ -20,7 +20,7 @@ def _workspace_has_any_data(conn, workspace_id: str) -> bool:
     ws = clean_text(workspace_id)
     if not ws:
         return False
-    checks = ["crm_contacts", "vendor_orders", "leads", "chapter_contacts", "activities", "messages"]
+    checks = ["crm_contacts", "vendor_orders", "leads", "chapter_contacts", "activities", "messages", "user_research_prompts"]
     for table in checks:
         if not _table_has_column(conn, table, "workspace_id"):
             continue

@@ -31,8 +31,6 @@ def chapter_detail_page(chapter_id: str):
             same_state=[],
             my_status="",
             crm_contact={},
-            research_url="",
-            research_query="",
             error="Chapter not found",
         )
 
@@ -185,8 +183,6 @@ def chapter_detail_page(chapter_id: str):
         same_state=bundle["same_state"],
         my_status=my_status,
         crm_contact=crm_contact,
-        research_url="",
-        research_query="",
         research_entity_data={
             "chapter_name": chapter_name,
             "organization": org_name,

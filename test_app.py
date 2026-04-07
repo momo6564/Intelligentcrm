@@ -13,6 +13,7 @@ from app.routes import api as api_routes
 from app.routes import chapters as chapter_routes
 from app.routes import institutions as institution_routes
 from app.routes import main as main_routes
+from app.research_memory import render_research_prompt, research_prompt_slots_for_user, save_research_prompt_slots
 from app.services.chapters import fetch_normalized_rows
 
 
@@ -145,7 +146,8 @@ class AppTests(unittest.TestCase):
             resp = self.client.get("/dashboard")
             self.assertEqual(resp.status_code, 200)
             body = resp.get_data(as_text=True)
-            self.assertIn("Load Served Map", body)
+            self.assertIn("renders the served campus map automatically on desktop", body)
+            self.assertNotIn("Load Served Map", body)
         finally:
             database_module.ensure_institutions_table = original_ensure
 
@@ -518,7 +520,7 @@ class AppTests(unittest.TestCase):
         self.assertTrue(saved_payload.get("ok"))
         self.assertEqual(saved_payload["prompts"][0]["label"], "Rush Fit")
         self.assertEqual(saved_payload["prompts"][1]["label"], "Decision Makers")
-        self.assertEqual(saved_payload["prompts"][2]["prompt_text"], "")
+        self.assertIn("{school}", saved_payload["prompts"][2]["prompt_text"])
 
         get_saved = self.client.get("/api/research-prompts?category=chapter")
         self.assertEqual(get_saved.status_code, 200)
@@ -535,6 +537,62 @@ class AppTests(unittest.TestCase):
         other_user_prompts = self.client.get("/api/research-prompts?category=chapter")
         self.assertEqual(other_user_prompts.status_code, 200)
         self.assertNotEqual(other_user_prompts.get_json()["prompts"][0]["label"], "Rush Fit")
+
+    def test_research_memory_prompts_are_workspace_scoped_for_same_user(self):
+        self._login("demo", "demo123")
+
+        with self.app.app_context():
+            conn = get_connection()
+            user_row = conn.execute(
+                "SELECT id, username, account_name, workspace_id FROM users WHERE username=?",
+                ("demo",),
+            ).fetchone()
+            user = {k: user_row[k] for k in user_row.keys()}
+
+            primary_workspace = user["workspace_id"]
+            primary_prompts = save_research_prompt_slots(
+                conn,
+                user,
+                "chapter",
+                [{"label": "Primary Workspace Prompt", "prompt_text": 'Research "{chapter_name}" rush fit ideas'}],
+                workspace_id=primary_workspace,
+            )
+            self.assertEqual(primary_prompts[0]["label"], "Primary Workspace Prompt")
+
+            alt_prompts_before_save = research_prompt_slots_for_user(
+                conn,
+                user,
+                "chapter",
+                workspace_id="ws-alt-demo",
+            )
+            self.assertNotEqual(alt_prompts_before_save[0]["label"], "Primary Workspace Prompt")
+
+            alt_prompts = save_research_prompt_slots(
+                conn,
+                user,
+                "chapter",
+                [{"label": "Alt Workspace Prompt", "prompt_text": 'Find leadership for "{organization}"'}],
+                workspace_id="ws-alt-demo",
+            )
+            self.assertEqual(alt_prompts[0]["label"], "Alt Workspace Prompt")
+
+            primary_prompts_after_alt_save = research_prompt_slots_for_user(
+                conn,
+                user,
+                "chapter",
+                workspace_id=primary_workspace,
+            )
+            self.assertEqual(primary_prompts_after_alt_save[0]["label"], "Primary Workspace Prompt")
+
+    def test_research_memory_supports_friendly_alias_placeholders(self):
+        rendered = render_research_prompt(
+            "Gimme <<university name>> suppliers list and <<organization name>> contacts",
+            {
+                "institution_name": "Winthrop University",
+                "organization": "Campus Purchasing",
+            },
+        )
+        self.assertEqual(rendered, "Gimme Winthrop University suppliers list and Campus Purchasing contacts")
 
     def test_research_memory_panel_renders_on_detail_pages(self):
         with self.app.app_context():

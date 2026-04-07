@@ -87,7 +87,6 @@ def vendor_detail_page():
     served_rows = []
     my_status = ""
     crm_contact = {}
-    research_query = ""
     licensed_orgs = []
     if lookup_name:
         rows = conn.execute(
@@ -162,8 +161,6 @@ def vendor_detail_page():
         if not org_set and clean_text(vendor.get("organization")):
             org_set.add(clean_text(vendor.get("organization")))
         licensed_orgs = sorted(org_set)
-        org_text = ", ".join(licensed_orgs) if licensed_orgs else "Unknown"
-        research_query = org_text
 
     error = "" if vendor else "Vendor not found."
     return render_app(
@@ -175,8 +172,6 @@ def vendor_detail_page():
         my_status=my_status,
         crm_contact=crm_contact,
         licensed_orgs=licensed_orgs,
-        research_url="",
-        research_query=research_query,
         research_entity_data={
             "vendor_name": lookup_name,
             "organization": clean_text(vendor.get("organization")),
