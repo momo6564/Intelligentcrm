@@ -3,7 +3,7 @@ from functools import wraps
 from flask import Blueprint, render_template, request, redirect, url_for, send_from_directory
 
 from ..auth import get_session_user
-from ..database import get_connection, ensure_crm_tables, ensure_default_users, derive_workspace_id
+from ..database import get_connection, ensure_crm_tables, ensure_default_users, derive_workspace_id, log_activity
 from ..config import Config
 from ..utils.passwords import hash_password
 from ..utils.text_utils import clean_text
@@ -37,6 +37,7 @@ def admin_dashboard():
     conn = get_connection()
     ensure_crm_tables(conn)
     ensure_default_users(conn)
+    me = get_session_user()
 
     feedback = conn.execute(
         """
@@ -57,12 +58,24 @@ def admin_dashboard():
         LIMIT 200
         """
     ).fetchall()
+    activity_rows = conn.execute(
+        """
+        SELECT a.id, a.action, a.entity_type, a.entity_id, a.details, a.workspace_id, a.created_at,
+               u.id AS actor_user_id, u.username, u.email, u.account_name, u.role
+        FROM activities a
+        LEFT JOIN users u ON u.id = a.user_id
+        ORDER BY a.created_at DESC, a.id DESC
+        LIMIT 250
+        """
+    ).fetchall()
     error = clean_text(request.args.get("error"))
     notice = clean_text(request.args.get("notice"))
     return render_admin(
         "admin/dashboard.html",
+        me=me,
         feedback=feedback,
         users=users,
+        activity_rows=activity_rows,
         error=error,
         notice=notice,
     )
@@ -71,6 +84,7 @@ def admin_dashboard():
 @bp.route("/admin/users/create", methods=["POST"])
 @admin_required()
 def admin_create_user():
+    me = get_session_user()
     username = clean_text(request.form.get("username"))
     password = clean_text(request.form.get("password"))
     account_name = clean_text(request.form.get("account_name"))
@@ -124,7 +138,18 @@ def admin_create_user():
         vals.append(ws_id)
 
     query = f"INSERT INTO users ({','.join(cols)}) VALUES ({','.join('?' for _ in cols)})"
-    conn.execute(query, tuple(vals))
+    cur = conn.execute(query, tuple(vals))
+    created_user_id = int(cur.lastrowid or 0)
+    log_activity(
+        conn,
+        int(me.get("id") or 0),
+        "admin_created_user",
+        "user",
+        str(created_user_id),
+        f"Created user {username} ({role})" + (f" for {account_name}" if account_name else ""),
+        workspace_id=clean_text(me.get("workspace_id")),
+        manufacturer_id=int(me.get("manufacturer_id") or 0),
+    )
     conn.commit()
     return redirect(url_for("admin.admin_dashboard", notice="User created"))
 

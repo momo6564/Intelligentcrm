@@ -102,6 +102,16 @@ def api_feedback_submit():
             image_name,
         ),
     )
+    log_activity(
+        conn,
+        int(user.get("id") or 0),
+        "feedback_submitted",
+        "feedback",
+        page_url or page_title,
+        f"Submitted feedback from {page_title or page_url or 'the current page'}",
+        workspace_id=workspace_id,
+        manufacturer_id=int(user.get("manufacturer_id") or 0),
+    )
     conn.commit()
     return jsonify({"ok": True})
 

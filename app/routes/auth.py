@@ -8,6 +8,7 @@ try:
 except Exception:  # pragma: no cover - Authlib optional in some environments
     MismatchingStateError = Exception
 
+from ..auth import get_session_user
 from ..database import get_connection, ensure_crm_tables, ensure_default_users, log_activity, derive_workspace_id
 from ..config import Config
 from ..utils.passwords import hash_password, password_hash_needs_refresh, verify_password
@@ -203,6 +204,17 @@ def login_page():
                 )
                 conn.execute("UPDATE users SET workspace_id=? WHERE id=?", (workspace_id, user_id))
                 conn.commit()
+            log_activity(
+                conn,
+                user_id,
+                "logged_in",
+                "session",
+                "",
+                "Signed in with email or username",
+                workspace_id=workspace_id,
+                manufacturer_id=manufacturer_id,
+            )
+            conn.commit()
             session["user_id"] = user_id
             if (next_path or "/") == "/":
                 return redirect(_default_dashboard_path(clean_text(row["account_type"])))
@@ -411,6 +423,23 @@ def google_callback():
             conn.commit()
         account_type = clean_text(user["account_type"]) if "account_type" in user.keys() else ""
         if account_type in {"manufacturer", "brand_owner"}:
+            user_id = int(user["id"])
+            workspace_id = clean_text(user["workspace_id"]) or derive_workspace_id(
+                clean_text(user["account_name"]),
+                clean_text(user["username"]),
+                user_id,
+            )
+            log_activity(
+                conn,
+                user_id,
+                "google_logged_in",
+                "session",
+                "",
+                "Signed in with Google",
+                workspace_id=workspace_id,
+                manufacturer_id=int(user["manufacturer_id"] or 0),
+            )
+            conn.commit()
             session["user_id"] = int(user_id)
             next_path = _safe_next_path(session.pop("google_next", "")) or "/"
             _clear_google_onboarding()
@@ -607,5 +636,21 @@ def reset_password_page():
 
 @bp.route("/logout")
 def logout_page():
+    user = get_session_user()
+    if user:
+        conn = get_connection()
+        ensure_crm_tables(conn)
+        ensure_default_users(conn)
+        log_activity(
+            conn,
+            int(user.get("id") or 0),
+            "logged_out",
+            "session",
+            "",
+            "Signed out",
+            workspace_id=clean_text(user.get("workspace_id")),
+            manufacturer_id=int(user.get("manufacturer_id") or 0),
+        )
+        conn.commit()
     session.clear()
     return redirect(url_for("auth.login_page"))
